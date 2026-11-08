@@ -2,26 +2,43 @@
 
 Stand: 2026-11-08. Fork `Asunaa-ctrl/hypergrok-trading-desk`, Basis `v1.7.1`, Commit `82bc645899b9581a693463b59553aa1329e021c4` (`git rev-parse HEAD` und `git rev-parse v1.7.1^{}` stimmen überein). Kein Upstream-PR, kein Merge, keine Veröffentlichung, kein Deployment.
 
-Es wurde kein neuer Bot angelegt. Die vorhandene Desk-Lead-Rolle bleibt unverändert. Die empfohlene Kennung `a9a5e3d6-724d-44ab-bb6f-ce99f55ac11b` ist nur eine Zeichenkette in der lokalen Hülle. Sie wurde nicht authentifiziert und kein Bot wurde kontaktiert. Native Bestätigung: ausstehend.
+Es wurde kein neuer Bot angelegt. Die vorhandene Desk-Lead-Rolle bleibt unverändert. Der bestehende Desk Lead hat das lokale Mandat als Rollenverständnis zur Kenntnis genommen. Das ist keine authentifizierte Verbindung und kein Laufzeitzugriff. Die Kennung `a9a5e3d6-724d-44ab-bb6f-ce99f55ac11b` bleibt eine Zeichenkette. Ein geänderter Urteilstext oder eine geänderte judge_id ohne passenden Provenance-Hash wird nicht ausgeführt.
 
 ## Befehle und Ergebnisse
 
+Nach der Prüfung auf gefälschte Urteile, Zustandsrennen, Ledger, Lookahead, Manifest-Tampering und die Anzeige:
+
 ```text
 python3 scripts/test_paper_sim.py
-# Ran 17 tests — OK
+# Ran 21 tests — OK
 
 python3 scripts/test_paper_dashboard.py
 # Ran 4 tests — OK
 
-python3 scripts/cli_journeys.py
-# Passed 18 read-only CLI journeys … local paper schema; only loopback POST /info used.
-
 bash scripts/check.sh
-# ok: 17 skills, 7 agents
-# Manifest-, npm-, Template-, Rounding-, Stop-Cost- und Journey-Prüfungen: OK
+# ok: 17 skills, 7 agents, 68 markdown files
+# Passed 18 read-only CLI journeys
 ```
 
-`check.sh` lief vor diesem Bericht. Neue Abhängigkeiten: keine. Browserprüfung gegen `127.0.0.1` mit Headless-Chrome: leerer Ordner zeigt `Noch kein Paper-Durchlauf gestartet` ohne virtuelles Cash; der synthetische Lauf zeigt REJECT und den deutschen Grund, bleibt aber in Phase 1; ein als Capture markierter Lauf ohne Marktnachweis erscheint in Phase 2 mit dem konfigurierten Startguthaben `2500.5`.
+Neue Abhängigkeiten: keine. Die 21 Simulator-Tests schließen jetzt ein: geändertes Urteil ohne Provenance-Hash führt nicht aus; geänderte judge_id wird abgelehnt; ein späteres frisches Buch füllt nicht zum veralteten Preis; eine Finanzierung nach der gebundenen Version blockiert die wartende Order; Manifest, Ledger und Journal, die nach dem Schreiben geändert werden, scheitern bei `--verify-run`; Replay öffnet keinen Socket.
+
+## Screenshots
+
+Diese Dateien liegen auf dem Rechner des Agenten, nicht auf dem Rechner des Nutzers:
+
+- `/opt/cursor/artifacts/papier-leer.png`
+- `/opt/cursor/artifacts/papier-synthetisch.png`
+- `/opt/cursor/artifacts/papier-capture.png`
+- `/opt/cursor/artifacts/papier-widerspruch.png`
+- `/opt/cursor/artifacts/papier-mobil.png`
+
+Sie zeigen nacheinander den leeren Ordner, ein erfundenes Fixture mit REJECT, einen als Capture bezeichneten Lauf ohne Marktnachweis, einen widersprüchlich umetikettierten Ordner ohne Kontostand, und die schmale Ansicht.
+
+## Wo die Oberfläche läuft
+
+Der Agent hat die Seite nur auf dem Loopback seines eigenen Remote-Rechners gelesen. Diese Adresse ist von hier aus nicht der Rechner des Nutzers und auch kein gemeinsamer Desktop. Sie ist jetzt nicht erreichbar.
+
+Damit die Oberfläche sichtbar wird, muss der Branch auf dem Rechner ausgecheckt werden, auf dem der Browser läuft. Dort, und nur dort, startet `python3 scripts/paper_dashboard.py --root <lokaler Ordner> --port 8765`. Der Browser auf demselben Rechner kann danach dessen Loopback öffnen. Ein anderer Rechner sieht diese Schleifenadresse nicht.
 
 ## Unterstützt
 
@@ -44,4 +61,4 @@ bash scripts/check.sh
 
 ## Grenzen
 
-Hashes zeigen lokale Wiederholbarkeit, keine unabhängige Herkunft. Ein bestandener Engineering-Test ist kein Strategieergebnis und kein Marktbeleg. `APPROVE` erlaubt nur eine hypothetische Aktion im Prozess. Testnet bleibt der bisherige, freigabepflichtige Weg.
+Hashes zeigen lokale Wiederholbarkeit, keine unabhängige Herkunft. Wer Entscheidung, Journal, Bericht und Manifest gemeinsam neu schreibt, erzeugt eine neue lokale Geschichte; das wird dadurch nicht authentisch. Ein bestandener Engineering-Test ist kein Strategieergebnis und kein Marktbeleg. `APPROVE` erlaubt nur eine hypothetische Aktion im Prozess. Testnet bleibt der bisherige, freigabepflichtige Weg. Es gibt keine Laufzeitverbindung zum Desk Lead.

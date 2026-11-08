@@ -4,7 +4,7 @@ Local paper is a hypothetical ledger in this process. It is not testnet, not mai
 
 Testnet practice still uses the normal lifecycle: a Risk PASS, your approval by ticket id, and one send by the Execution Trader. A recorded `APPROVE` here does not approve that ticket and does not change `risk-limits.md`. The Desk Lead profile is unchanged. No new Bot is created. Native acknowledgement of the local judge role is pending.
 
-The role-fit note names the existing Desk Lead id `a9a5e3d6-724d-44ab-bb6f-ce99f55ac11b`. The simulator stores a `judge_id` only as a string the config declares. Matching that id does not authenticate a session and does not contact the Bot. Replay never asks a model or a chat for a fresh verdict.
+The existing Desk Lead has acknowledged this local-paper mandate as role understanding. That acknowledgement is not an authenticated connection and this process does not call the Bot. The role file is unchanged and no new Bot is created. The id `a9a5e3d6-724d-44ab-bb6f-ce99f55ac11b` is only a declared string. Matching it does not authenticate a session. Replay never asks a model or a chat for a fresh verdict. An edited verdict or judge id that no longer matches its provenance hash is refused.
 
 ## What you must supply
 

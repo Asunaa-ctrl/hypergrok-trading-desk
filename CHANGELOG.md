@@ -2,6 +2,7 @@
 
 ## Unreleased
 
++ Record that the existing Desk Lead's acknowledgement of the local-paper mandate is role understanding only. It is not an authenticated connection and the simulator still does not call a Bot.
 + Add a local paper simulator and a localhost read-only dashboard. Hypothetical fills, fees, funding and decision envelopes stay in process. The tool does not read an account, sign, or send to mainnet or testnet. Recorded APPROVE/REJECT envelopes are replayed; a fresh judge is not called. The existing Desk Lead role is cited, not replaced, and a supplied judge id is not authenticated authority. No strategy, capital, risk limit or protection policy is selected by the software. Engineering tests use synthetic fixtures and are not market evidence.
 
 ## 1.7.1 - 2026-11-01

@@ -107,11 +107,23 @@ class DashboardTest(unittest.TestCase):
             result = sim.replay(cfg, document, sim.decisions_document(cfg, []))
             sim.write_run(root / "runs" / "captured-empty", result)
             status = dash.scan(root)
-        self.assertTrue(status["paper"]["started"])
-        self.assertIsNone(status["paper"]["message_de"])
-        self.assertEqual(status["paper"]["runs"][0]["ledger"]["cash"], "10000")
-        self.assertFalse(status["paper"]["runs"][0]["claims_market_evidence"])
-        self.assertEqual(len(status["engineering"]["synthetic_runs"]), 1)
+            self.assertTrue(status["paper"]["started"])
+            self.assertIsNone(status["paper"]["message_de"])
+            self.assertEqual(status["paper"]["runs"][0]["ledger"]["cash"], "10000")
+            self.assertFalse(status["paper"]["runs"][0]["claims_market_evidence"])
+            self.assertFalse(status["paper"]["runs"][0]["judge_provenance"]["authenticated"])
+            self.assertEqual(len(status["engineering"]["synthetic_runs"]), 1)
+            report_path = root / "runs" / "captured-empty" / "report.json"
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            report["evidence_class"] = "synthetic_engineering_fixture"
+            report["judge_provenance"]["authenticated"] = True
+            report["judge_provenance"]["runtime_integration"] = True
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+            forged = dash.scan(root)
+        self.assertFalse(forged["paper"]["started"])
+        self.assertEqual(forged["paper"]["message_de"], "Noch kein Paper-Durchlauf gestartet")
+        self.assertEqual(forged["engineering"]["conflicts"][0]["note_de"], "Widersprüchliche Dateien. Kein Kontostand aus diesem Ordner.")
+        self.assertNotIn("ledger", forged["engineering"]["conflicts"][0])
 
 
 if __name__ == "__main__":

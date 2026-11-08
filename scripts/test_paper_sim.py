@@ -502,6 +502,95 @@ class SimulatorTest(unittest.TestCase):
         import tempfile
         return _Bundle(write_bundle, parameters, complete_reader, bar)
 
+    def test_forged_verdict_and_judge_id_do_not_trade(self):
+        events = [book(1, 1000, [("99", "2")], [("101", "2")]), intent(2, 1000, px="101")]
+        cfg = base_config()
+        document = tape(events)
+        original = envelope(cfg, document, events[1], evidence=[1], verdict="REJECT")
+        forged = copy.deepcopy(original)
+        forged["verdict"] = "APPROVE"
+        forged_run = run(events, [forged], cfg=cfg)
+        self.assertEqual(forged_run["report"]["ledger"]["position"], "0")
+        self.assertEqual(forged_run["report"]["decisions"][0]["reason_code"], "missing_field")
+        relabelled = copy.deepcopy(original)
+        relabelled["judge_id"] = "forged-id"
+        relabelled["hashes"]["provenance"] = sim.provenance_hash(relabelled)
+        refused = run(events, [relabelled], cfg=cfg)
+        self.assertEqual(refused["report"]["ledger"]["position"], "0")
+        self.assertEqual(refused["report"]["decisions"][0]["reason_code"], "judge_id_mismatch")
+        self.assertFalse(refused["report"]["judge_provenance"]["authenticated"])
+        self.assertFalse(refused["report"]["runtime_bot_integration"])
+        self.assertEqual(refused["report"]["judge_provenance"]["recommendation_status"], "role_understanding_acknowledged_not_authenticated")
+
+    def test_stale_book_cannot_fill_and_a_later_state_change_blocks_the_waiting_order(self):
+        cfg = base_config()
+        cfg["execution"]["stale_book_ms"] = 500
+        events = [
+            book(1, 0, [("99", "2")], [("101", "2")]),
+            intent(2, 2000, px="150", tif="gtc"),
+            book(3, 2500, [("99", "2")], [("140", "2")]),
+        ]
+        fresh = run(events, lambda c, document: [envelope(c, document, events[1], evidence=[1], expires=9000)], cfg=cfg)
+        fills = json.loads(fresh["files"]["orders.json"])[0]["fills"]
+        self.assertEqual([item["px"] for item in fills], ["140"])
+        self.assertNotIn("101", [item["px"] for item in fills])
+        events = [
+            book(1, 1000, [("99", "2")], [("100", "2")]),
+            intent(2, 1000, px="100", decision_id="D1", client="c1"),
+            intent(3, 3000, px="50", side="sell", sz="1", reduce_only=True, tif="gtc", decision_id="DX", client="cx"),
+            {"sequence": 4, "type": "funding", "exchange_time_ms": HOUR + 20, "local_receipt_ms": HOUR + 20, "coin": "ETH", "funding_rate": "0.0001", "oracle_px": "100", "premium": "0"},
+            book(5, HOUR + 4000, [("90", "2")], [("110", "2")]),
+        ]
+        def envs(config, document):
+            first = envelope(config, document, events[1], evidence=[1], expires=HOUR + 9000)
+            state = sim.binding_hash(Decimal("10000") - Decimal("100") - Decimal("0.045"), Decimal(1), Decimal("100"), None, [], ["D1"], [])
+            second = envelope(config, document, events[2], state=state, as_of=1, evidence=[1], expires=HOUR + 9000)
+            return [first, second]
+        raced = run(events, envs, cfg=cfg)
+        self.assertEqual(raced["report"]["ledger"]["position"], "1")
+        self.assertTrue(any(item["reason_code"] == "state_changed" for item in raced["report"]["decisions"]))
+        self.assertEqual(raced["report"]["funding"]["posted"], "-0.01")
+        cash = Decimal(raced["report"]["ledger"]["cash"])
+        self.assertEqual(cash, Decimal("10000") - Decimal("100") - Decimal("0.045") - Decimal("0.01"))
+
+    def test_manifest_and_journal_tampering_fail_verification(self):
+        import tempfile
+        events = [book(1, 1000, [("99", "2")], [("101", "2")]), intent(2, 1000, px="101")]
+        result = run(events, lambda cfg, document: [envelope(cfg, document, events[1], evidence=[1])])
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "run"
+            sim.write_run(directory, result)
+            manifest_path = directory / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["experiment_accepted"] = not manifest["experiment_accepted"]
+            manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            with self.assertRaises(sim.PaperError) as caught:
+                sim.verify_run(directory)
+            self.assertEqual(caught.exception.code, "verification_failed")
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "run"
+            sim.write_run(directory, result)
+            ledger = directory / "ledger.json"
+            ledger.write_text(ledger.read_text(encoding="utf-8").replace("10000", "10001", 1), encoding="utf-8")
+            with self.assertRaises(sim.PaperError):
+                sim.verify_run(directory)
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "run"
+            sim.write_run(directory, result)
+            journal = directory / "journal.jsonl"
+            journal.write_bytes(journal.read_bytes().replace(b"APPROVE", b"REJECT"))
+            with self.assertRaises(sim.PaperError):
+                sim.verify_run(directory)
+
+    def test_replay_opens_no_socket(self):
+        events = [book(1, 1000, [("99", "2")], [("101", "2")]), intent(2, 1000, px="101")]
+        with patch("socket.socket", side_effect=AssertionError("socket")), patch("socket.create_connection", side_effect=AssertionError("socket")):
+            result = run(events, lambda cfg, document: [envelope(cfg, document, events[1], evidence=[1])])
+        self.assertEqual(result["report"]["ledger"]["position"], "1")
+        source = Path(sim.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("urlopen", source)
+        self.assertNotIn("/exchange", source)
+
     def test_verify_run_and_write_are_stable(self):
         import tempfile
         events = [book(1, 1000, [("99", "2")], [("101", "2")]), intent(2, 1000, px="101")]

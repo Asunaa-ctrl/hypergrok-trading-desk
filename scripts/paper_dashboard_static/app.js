@@ -76,7 +76,7 @@ function renderRun(run) {
     flags.append(badge("badge-synthetic", "Synthetisches Fixture — keine Marktdaten"));
   }
   if (!run.claims_market_evidence) flags.append(badge("badge-synthetic", "Kein Marktnachweis"));
-  flags.append(badge(run.accepted_experiment ? "badge-approve" : "badge-reject", run.accepted_experiment ? "Bericht vollständig" : "Bericht unvollständig"));
+  flags.append(badge(run.accepted_experiment ? "badge-approve" : "badge-reject", run.accepted_experiment ? "Ledger stimmt; kein Strategieergebnis" : "Ledger oder Finanzierung unvollständig"));
   card.append(flags);
   if (!run.readable) {
     card.append(el("p", null, "Dieser Ordner konnte nicht gelesen werden."));
@@ -143,10 +143,24 @@ function render(status) {
     wrap.append(table);
     engineering.append(wrap);
   }
+  const conflicts = status.engineering.conflicts || [];
+  if (conflicts.length) {
+    engineering.append(el("h3", null, "Widersprüchliche Ordner"));
+    for (const conflict of conflicts) {
+      const card = el("article");
+      card.append(el("h3", null, conflict.id || "Ordner"));
+      card.append(el("p", null, conflict.note_de || "Widersprüchliche Dateien. Kein Kontostand aus diesem Ordner."));
+      const list = document.createElement("ul");
+      for (const error of conflict.errors || []) list.append(el("li", null, error.detail_de || error.code));
+      card.append(list);
+      engineering.append(card);
+    }
+  }
   if (!status.engineering.synthetic_runs.length) {
     engineering.append(el("p", null, "Kein synthetischer Simulatorlauf in diesem Ordner."));
   } else {
     engineering.append(el("h3", null, "Synthetische Simulatorläufe"));
+    engineering.append(el("p", null, "Erfundenes Fixture. Kein Paper-Durchlauf und kein erfasstes Marktzeugnis."));
     for (const run of status.engineering.synthetic_runs) engineering.append(renderRun(run));
   }
   const paper = document.querySelector("#paper-body");
@@ -156,6 +170,7 @@ function render(status) {
     paper.firstChild.id = "paper-empty";
     return;
   }
+  paper.append(el("p", null, "Auch ein als Capture bezeichneter Lauf ist eine Simulation. Fehlender Marktnachweis bleibt fehlender Marktnachweis."));
   for (const run of status.paper.runs) paper.append(renderRun(run));
 }
 

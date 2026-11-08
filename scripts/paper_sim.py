@@ -109,7 +109,7 @@ LIMITATIONS = [
     "Candles do not establish intrabar order, historical spread, historical depth, or the historical oracle.",
     "Funding needs the hourly rate and the oracle on that payment event. Missing evidence is unavailable, not zero. The rate is not divided by eight.",
     "Fee rates are the explicit scenario. No account fee tier, referral, staking discount, or HIP-3 scale is queried or assumed.",
-    "Hashes show local consistency, not independent provenance or tamper-proof storage.",
+    "Hashes show local consistency, not independent provenance or tamper-proof storage. Rewriting the decisions and every derived file creates a new local story; it does not become authenticated authority.",
     "Passing engineering tests do not validate a strategy and are not market evidence.",
     "The recommended Desk Lead id is a role-fit note. This process does not contact that Bot.",
     "Liquidation and leverage are not modelled. Negative virtual cash is unresolved insolvency, not a liquidation.",
@@ -227,12 +227,12 @@ def role_provenance(declared_id):
         "recommended_bot_id": RECOMMENDED_BOT_ID,
         "declared_id": declared_id,
         "declared_id_matches_recommendation": declared_id == RECOMMENDED_BOT_ID,
-        "recommendation_status": "role_fit_recommended_native_acknowledgement_pending",
+        "recommendation_status": "role_understanding_acknowledged_not_authenticated",
         "bot_created": False,
         "bot_contacted": False,
         "runtime_integration": False,
         "authenticated": False,
-        "note": "The declared judge_id is a supplied string. Equality with the recommended id does not authenticate a Bot and does not contact one.",
+        "note": "The existing Desk Lead has acknowledged the local-paper mandate as role understanding. That acknowledgement is not an authenticated connection, and this process does not call the Bot. Equality of the declared judge_id with the recommended id does not authenticate anything.",
     }
 
 
@@ -569,6 +569,22 @@ class RecordedDecisionSource:
         return self.envelopes.get(decision_id)
 
 
+PROVENANCE_FIELDS = (
+    "as_of_sequence", "decision_id", "decision_time_berlin", "decision_time_ms",
+    "evidence_sequences", "expected_state_hash", "expires_at_ms", "explanation",
+    "intent", "judge_id", "kind", "max_book_age_ms", "parent_id", "proposal_id",
+    "reason_codes", "research", "risk", "run_id", "unavailable", "verdict",
+)
+
+
+def provenance_hash(raw):
+    """Digest of the decision the replay must not silently edit. The hash is not an external notary."""
+    if not isinstance(raw, dict):
+        raise PaperError("hash_mismatch", "decision provenance is not an object")
+    body = {key: raw.get(key) for key in PROVENANCE_FIELDS}
+    return digest(canonical(body))
+
+
 def validate_envelope(raw):
     keys = {
         "schema_version", "decision_id", "run_id", "proposal_id", "parent_id", "kind",
@@ -612,7 +628,7 @@ def validate_envelope(raw):
     if not isinstance(intent["coin"], str) or not intent["coin"]:
         raise PaperError("missing_field", "coin")
     hashes = raw["hashes"]
-    need_keys(hashes, ["strategy", "config", "code", "data", "ledger", "risk", "research"], "hashes")
+    need_keys(hashes, ["strategy", "config", "code", "data", "ledger", "risk", "research", "provenance"], "hashes")
     for name, value in hashes.items():
         if not isinstance(value, str) or len(value) != 64:
             raise PaperError("missing_field", f"hashes.{name}")
@@ -655,6 +671,8 @@ def validate_envelope(raw):
             raise PaperError("missing_field", "research reason")
     if digest(canonical(research)) != hashes["research"]:
         raise PaperError("hash_mismatch", "research hash does not match the research object")
+    if hashes["provenance"] != provenance_hash(raw):
+        raise PaperError("hash_mismatch", "provenance hash does not match verdict, judge id, intent and explanation")
     return raw
 
 
@@ -665,8 +683,6 @@ def build_envelope(*, config, tape, intent, verdict, risk_verdict, risk_reason, 
     """
     if verdict not in ("APPROVE", "REJECT"):
         raise PaperError("invalid_arguments", "caller must supply APPROVE or REJECT")
-    if "verdict" not in intent and False:
-        pass
     risk = {
         "freshness": risk_freshness,
         "gates": risk_gates,
@@ -714,6 +730,7 @@ def build_envelope(*, config, tape, intent, verdict, risk_verdict, risk_reason, 
         "config": digest(canonical(config)),
         "data": digest(canonical(tape)),
         "ledger": expected_state_hash,
+        "provenance": provenance_hash(body),
         "research": digest(canonical(research)),
         "risk": digest(canonical(risk)),
         "strategy": config["strategy"]["rules_hash"],
@@ -1336,7 +1353,7 @@ class Simulator:
         if env["run_id"] != self.cfg["run_id"] or env["judge_id"] != self.cfg["judge_id"]:
             return "judge_id_mismatch" if env["judge_id"] != self.cfg["judge_id"] else "hash_mismatch"
         hashes = env["hashes"]
-        if hashes["config"] != self.config_hash or hashes["data"] != self.tape_hash or hashes["code"] != self.code_hash or hashes["strategy"] != self.cfg["strategy"]["rules_hash"]:
+        if hashes.get("provenance") != provenance_hash(env) or hashes["config"] != self.config_hash or hashes["data"] != self.tape_hash or hashes["code"] != self.code_hash or hashes["strategy"] != self.cfg["strategy"]["rules_hash"]:
             return "hash_mismatch"
         if env["max_book_age_ms"] != self.cfg["stale_ms"]:
             return "freshness_limit_mismatch"

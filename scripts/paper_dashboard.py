@@ -52,16 +52,30 @@ def _run(directory):
     try:
         report = _read_json(directory / "report.json")
         manifest = _read_json(directory / "manifest.json")
+        config = _read_json(directory / "config.json")
     except (OSError, json.JSONDecodeError, UnicodeError) as exc:
-        return {"id": directory.name, "readable": False, "error": str(exc), "evidence_class": None}
+        return {"id": directory.name, "readable": False, "error": str(exc), "evidence_class": None, "classification": "unreadable"}
+    config_class = config.get("evidence_class") if isinstance(config, dict) else None
+    report_class = report.get("evidence_class")
+    conflict = config_class != report_class or config_class not in ("synthetic_engineering_fixture", "captured_public_replay")
+    provenance = report.get("judge_provenance") if isinstance(report.get("judge_provenance"), dict) else {}
+    forged_authority = any(provenance.get(key) is True for key in ("authenticated", "runtime_integration", "bot_contacted"))
     ledger = report.get("ledger") or {}
     quality = report.get("data_quality") or {}
     observed = datetime.fromtimestamp((directory / "manifest.json").stat().st_mtime, timezone.utc)
+    errors = _errors(report)
+    if conflict:
+        errors.insert(0, {"code": "evidence_conflict", "detail_de": "Konfiguration und Bericht widersprechen sich oder die Belegklasse fehlt. Dieser Ordner wird nicht als Paper-Durchlauf angezeigt."})
+    if forged_authority:
+        errors.insert(0, {"code": "forged_authority", "detail_de": "Der Bericht behauptet eine Authentifizierung oder eine Bot-Verbindung. Die Anzeige stuft das als falsch ein."})
     return {
         "id": directory.name,
         "readable": True,
-        "evidence_class": report.get("evidence_class"),
-        "claims_market_evidence": report.get("claims_market_evidence") is True,
+        "classification": "conflict" if conflict else config_class,
+        "evidence_class": None if conflict else config_class,
+        "report_evidence_class": report_class,
+        "config_evidence_class": config_class,
+        "claims_market_evidence": False if conflict else report.get("claims_market_evidence") is True,
         "claims_demonstrated_edge": False,
         "simulated": True,
         "source_network": report.get("source_network"),
@@ -89,10 +103,18 @@ def _run(directory):
             "data_sha256": report.get("data_sha256"),
             "journal_head": manifest.get("journal_head"),
         },
-        "judge_provenance": report.get("judge_provenance"),
+        "judge_provenance": {
+            "authenticated": False,
+            "runtime_integration": False,
+            "bot_contacted": False,
+            "bot_created": False,
+            "declared_id": provenance.get("declared_id"),
+            "recommendation_status": "role_understanding_acknowledged_not_authenticated",
+            "note_de": "Die Kenntnisnahme des Desk Lead ist Rollenverständnis, keine authentifizierte Verbindung und kein Laufzeitzugriff.",
+        },
         "file_observed_at_utc": observed.isoformat(timespec="seconds"),
         "equity_points": report.get("equity_points") or [],
-        "errors": _errors(report),
+        "errors": errors,
     }
 
 
@@ -122,15 +144,16 @@ def scan(root):
     if runs_dir.is_dir() and not runs_dir.is_symlink():
         for child in sorted(path for path in runs_dir.iterdir() if path.is_dir() and not path.is_symlink()):
             runs.append(_run(child))
-    synthetic = [item for item in runs if item.get("evidence_class") == "synthetic_engineering_fixture"]
-    paper = [item for item in runs if item.get("evidence_class") == "captured_public_replay"]
+    synthetic = [item for item in runs if item.get("classification") == "synthetic_engineering_fixture"]
+    paper = [item for item in runs if item.get("classification") == "captured_public_replay"]
+    conflicts = [item for item in runs if item.get("classification") == "conflict"]
     return {
         "schema_version": SCHEMA_VERSION,
         "mode": "local_readonly_dashboard",
         "bind": HOST,
         "read_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "disclaimer_de": "Bestandene technische Tests prüfen nur die Software. Sie validieren keine Strategie und sind kein Marktbeweis.",
-        "judge_note_de": "Die judge_id ist eine gelieferte Zeichenkette. Sie authentifiziert den Desk Lead nicht, und dieser Prozess kontaktiert keinen Bot.",
+        "judge_note_de": "Die Kenntnisnahme des Desk Lead ist nur Rollenverständnis. Die judge_id authentifiziert ihn nicht, und dieser Prozess kontaktiert keinen Bot.",
         "engineering": {
             "label_de": "Phase 1 — Entwicklung und technische Prüfung",
             "records": records,
@@ -141,6 +164,14 @@ def scan(root):
                 "errors": sum(item.get("status") == "error" for item in records),
             },
             "synthetic_runs": synthetic,
+            "conflicts": [{
+                "id": item.get("id"),
+                "readable": item.get("readable"),
+                "errors": item.get("errors"),
+                "config_evidence_class": item.get("config_evidence_class"),
+                "report_evidence_class": item.get("report_evidence_class"),
+                "note_de": "Widersprüchliche Dateien. Kein Kontostand aus diesem Ordner.",
+            } for item in conflicts],
         },
         "paper": {
             "label_de": "Phase 2 — Lokaler Paper-Durchlauf",
