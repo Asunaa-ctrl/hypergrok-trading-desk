@@ -15,6 +15,7 @@ import sys
 from urllib.parse import urlsplit
 
 from cli_contract import ReadOnlyParser
+from paper_capture import INTERVALS_MS, validate_observed_bundle
 from paper_sim import PaperError, validate_paper_template
 
 HOST = "127.0.0.1"
@@ -154,10 +155,15 @@ def _orders(directory):
     return rows if isinstance(rows, list) else []
 
 
+STALE_BOOK_MS = 15_000
+
+
 def _market(root):
-    """Candles and books are plotted only from a non-fixture capture. Otherwise they stay empty."""
+    """Plot a validated observed /info bundle. Loopback and synthetic files stay out of this view."""
     last_seen = None
     fixture = False
+    chosen = None
+    invalid = False
     for manifest in sorted(root.glob("captures/*/manifest.json")):
         if manifest.is_symlink():
             continue
@@ -167,39 +173,109 @@ def _market(root):
             continue
         stamp = None
         records = bundle.get("records") if isinstance(bundle, dict) else None
-        if isinstance(records, list) and records:
+        if isinstance(records, list) and records and isinstance(records[0], dict):
             stamp = records[0].get("retrieved_at_utc")
         if stamp and (last_seen is None or stamp > last_seen):
             last_seen = stamp
-        if bundle.get("evidence_class") != "captured_public_replay":
+        if not isinstance(bundle, dict) or bundle.get("evidence_class") != "observed_public_info":
             fixture = True
             continue
-        if bundle.get("network_execution") in (None, "not_performed", "loopback_only"):
-            fixture = True
+        try:
+            validate_observed_bundle(bundle)
+        except (PaperError, KeyError, TypeError):
+            invalid = True
             continue
-        if bundle.get("claims_market_evidence") is not True:
-            continue
-        candles, book = _observed_market(bundle)
-        return _market_payload(candles, book, last_seen, False)
-    return _market_payload([], None, last_seen, fixture)
+        if chosen is None or stamp is None or chosen[0] is None or stamp >= chosen[0]:
+            chosen = (stamp, bundle)
+    if chosen is None:
+        payload = _market_payload([], None, last_seen, fixture, None)
+        if invalid:
+            payload["invalid_bundle"] = True
+            payload["candle_reason_de"] = "Eine beobachtete Datei hat den lokalen Hash nicht bestanden und wird nicht gezeichnet."
+        return payload
+    view = _observed_market(chosen[1])
+    payload = _market_payload(view["candles"], view["book"], last_seen, fixture, chosen[1])
+    payload.update(view["meta"])
+    return payload
+
+
+def _levels(levels):
+    rows = []
+    if not isinstance(levels, list):
+        return None
+    for level in levels:
+        if not isinstance(level, dict) or level.get("px") in (None, "") or level.get("sz") in (None, ""):
+            return None
+        rows.append({"px": level["px"], "sz": level["sz"]})
+    return rows
 
 
 def _observed_market(bundle):
     candles, book = [], None
+    missing = 0
+    interval_ms = None
     for record in bundle.get("records") or []:
         request = record.get("request") or {}
         body = record.get("body")
-        as_of = record.get("retrieved_at_utc")
+        provenance = {
+            "as_of": record.get("retrieved_at_utc"),
+            "externally_authenticated": False,
+            "sha256": record.get("sha256"),
+            "source": record.get("url"),
+        }
         if request.get("type") == "candleSnapshot" and isinstance(body, list):
+            interval_ms = INTERVALS_MS.get((request.get("req") or {}).get("interval"))
             for row in body:
-                if isinstance(row, dict) and all(row.get(key) not in (None, "") for key in ("t", "o", "h", "l", "c")):
-                    candles.append({"t": row["t"], "o": row["o"], "h": row["h"], "l": row["l"], "c": row["c"], "as_of": as_of, "source": "captured /info candleSnapshot"})
-        if request.get("type") == "l2Book" and isinstance(body, dict) and isinstance(body.get("levels"), list) and len(body["levels"]) == 2:
-            book = {"time": body.get("time"), "as_of": as_of, "bids": body["levels"][0], "asks": body["levels"][1], "source": "captured /info l2Book"}
-    return candles, book
+                if not isinstance(row, dict) or any(row.get(key) in (None, "") for key in ("t", "o", "h", "l", "c")):
+                    missing += 1
+                    continue
+                candles.append({"t": row["t"], "o": row["o"], "h": row["h"], "l": row["l"], "c": row["c"], **provenance})
+        if request.get("type") == "l2Book" and isinstance(body, dict):
+            levels = body.get("levels")
+            bids = _levels(levels[0]) if isinstance(levels, list) and len(levels) == 2 else None
+            asks = _levels(levels[1]) if isinstance(levels, list) and len(levels) == 2 else None
+            if bids is None or asks is None:
+                continue
+            book_time = body.get("time")
+            receipt = record.get("local_receipt_ms")
+            stale = not isinstance(book_time, int) or not isinstance(receipt, int) or abs(receipt - book_time) > STALE_BOOK_MS
+            book = {
+                "asks": asks,
+                "bids": bids,
+                "stale": stale,
+                "stale_reason_de": "Das Buch ist älter als 15 Sekunden oder ohne vergleichbare Zeiten und wird nicht als frisch behandelt." if stale else None,
+                "time": book_time,
+                **provenance,
+            }
+    candles.sort(key=lambda row: row["t"] if isinstance(row["t"], int) else 0)
+    gapped = []
+    gap_count = 0
+    previous = None
+    for row in candles:
+        if previous is not None and interval_ms and isinstance(row["t"], int) and row["t"] > previous + interval_ms:
+            gapped.append({"gap": True})
+            gap_count += 1
+        gapped.append(row)
+        if isinstance(row["t"], int):
+            previous = row["t"]
+    return {
+        "book": book,
+        "candles": gapped,
+        "meta": {
+            "collection_performed": bundle.get("collection_performed") is True,
+            "externally_authenticated": False,
+            "gap_count": gap_count,
+            "hash_scope": bundle.get("hash_scope"),
+            "missing_candles": missing,
+            "provenance_note_de": "Lokaler SHA-256 der gespeicherten Antwort. Keine externe Beglaubigung.",
+            "test_harness": bundle.get("test_harness") is True,
+            "test_label": bundle.get("test_label") if bundle.get("test_harness") is True else None,
+        },
+    }
 
 
-def _market_payload(candles, book, last_seen, fixture):
+def _market_payload(candles, book, last_seen, fixture, bundle):
+    plotted = any(isinstance(row, dict) and not row.get("gap") for row in candles) or bool(book)
     if last_seen is None:
         collector = {"healthy": False, "last_seen_utc": None, "state": "stopped", "note_de": "Kein Sammlerlauf. Ein gestoppter Prozess oder ein ausgeschalteter Rechner ist nicht gesund und hat kein last-seen."}
     else:
@@ -208,10 +284,18 @@ def _market_payload(candles, book, last_seen, fixture):
         "book": book,
         "book_reason_de": None if book else "Kein beobachtetes Orderbuch. Historische Tiefe wird nicht rekonstruiert.",
         "candles": candles,
-        "candle_reason_de": None if candles else "Keine erfassten Kerzen. Es wird keine Kursreihe erfunden.",
+        "candle_reason_de": None if any(isinstance(row, dict) and not row.get("gap") for row in candles) else "Keine erfassten Kerzen. Es wird keine Kursreihe erfunden.",
+        "collection_performed": False if bundle is None else bundle.get("collection_performed") is True,
         "collector": collector,
+        "externally_authenticated": False,
         "fixture_present": fixture,
-        "plotted": bool(candles or book),
+        "gap_count": 0,
+        "hash_scope": None if bundle is None else bundle.get("hash_scope"),
+        "missing_candles": 0,
+        "plotted": plotted,
+        "provenance_note_de": "Lokaler SHA-256 der gespeicherten Antwort. Keine externe Beglaubigung." if bundle else None,
+        "test_harness": False if bundle is None else bundle.get("test_harness") is True,
+        "test_label": bundle.get("test_label") if isinstance(bundle, dict) and bundle.get("test_harness") is True else None,
     }
 
 

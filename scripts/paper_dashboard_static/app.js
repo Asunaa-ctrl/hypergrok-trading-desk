@@ -75,17 +75,20 @@ function lineChart(points, currency) {
 }
 
 function candleChart(candles) {
-  if (!candles || !candles.length) return unavailable("Keine erfassten Kerzen. Es wird keine Kursreihe erfunden.");
+  const rows = (candles || []).filter((row) => row && row.gap !== true);
+  if (!rows.length) return unavailable("Keine erfassten Kerzen. Es wird keine Kursreihe erfunden.");
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("class", "chart");
   svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", "Kerzen aus erfassten OHLC, Stand " + (candles[0].as_of || "ohne Zeitstempel"));
-  const highs = candles.map((row) => Number(row.h));
-  const lows = candles.map((row) => Number(row.l));
+  svg.setAttribute("aria-label", "Kerzen aus erfassten OHLC, Lücken bleiben offen, Stand " + (rows[0].as_of || "ohne Zeitstempel"));
+  const highs = rows.map((row) => Number(row.h));
+  const lows = rows.map((row) => Number(row.l));
+  if (highs.concat(lows).some((value) => !Number.isFinite(value))) return unavailable("Kerzen sind nicht numerisch. Keine Kursreihe.");
   const min = Math.min(...lows);
   const max = Math.max(...highs);
   const span = max - min || 1;
-  candles.forEach((row, index) => {
+  (candles || []).forEach((row, index) => {
+    if (!row || row.gap === true) return;
     const x = ((index + 0.5) / candles.length) * 100;
     const y = (price) => 100 - ((Number(price) - min) / span) * 100;
     const wick = document.createElementNS("http://www.w3.org/2000/svg", "line");
@@ -104,7 +107,8 @@ function candleChart(candles) {
   svg.setAttribute("viewBox", "0 0 100 100");
   svg.setAttribute("preserveAspectRatio", "none");
   const wrap = el("div");
-  wrap.append(svg, el("p", "empty", "Quelle: " + candles[0].source + ". Stand: " + (candles[0].as_of || "nicht verfügbar") + "."));
+  const hash = rows[0].sha256 ? " Hash " + rows[0].sha256 + " ist lokal und nicht extern beglaubigt." : "";
+  wrap.append(svg, el("p", "empty", "Quelle: " + (rows[0].source || "Beobachtung") + ". Stand: " + (rows[0].as_of || "nicht verfügbar") + "." + hash));
   return wrap;
 }
 
@@ -117,7 +121,9 @@ function bookLadder(book) {
   (book.asks || []).slice(0, 8).forEach((level) => table.append(row("Ask", level)));
   (book.bids || []).slice(0, 8).forEach((level) => table.append(row("Bid", level)));
   const wrap = el("div");
-  wrap.append(table, el("p", "empty", "Quelle: " + (book.source || "Beobachtung") + ". Stand: " + (book.as_of || book.time || "nicht verfügbar") + "."));
+  if (book.stale) wrap.append(el("p", "stale", book.stale_reason_de || "Veraltet."));
+  const hash = book.sha256 ? " Hash " + book.sha256 + " ist lokal und nicht extern beglaubigt." : "";
+  wrap.append(table, el("p", "empty", "Quelle: " + (book.source || "Beobachtung") + ". Stand: " + (book.as_of || book.time || "nicht verfügbar") + "." + hash));
   return wrap;
 }
 
@@ -157,8 +163,18 @@ function render(status) {
     ["Native Entscheidung", "ausstehend"],
     ["Beobachtung", template.observation_market || "keine"],
   ]));
-  document.querySelector("#candles").replaceChildren(el("h2", null, "Kurs"), candleChart(status.market.candles));
-  document.querySelector("#book").replaceChildren(el("h2", null, "Orderbuch"), bookLadder(status.market.book));
+  const market = status.market || {};
+  const candles = document.querySelector("#candles");
+  candles.replaceChildren(el("h2", null, "Kurs"));
+  if (market.test_harness) candles.append(el("p", "test-banner", market.test_label));
+  if (market.provenance_note_de) candles.append(el("p", "empty", market.provenance_note_de));
+  candles.append(candleChart(market.candles));
+  if (market.gap_count) candles.append(el("p", "empty", "Lücken: " + market.gap_count + ". Die Reihe wird darüber nicht verbunden."));
+  if (market.missing_candles) candles.append(el("p", "empty", "Unvollständige Kerzen ausgelassen: " + market.missing_candles + "."));
+  const book = document.querySelector("#book");
+  book.replaceChildren(el("h2", null, "Orderbuch"));
+  if (market.test_harness) book.append(el("p", "test-banner", market.test_label));
+  book.append(bookLadder(market.book));
   const paper = document.querySelector("#pnl");
   paper.replaceChildren(el("h2", null, "Virtuelles Ergebnis"));
   if (!status.paper.started) {
@@ -182,8 +198,11 @@ function render(status) {
         ["FX-Neubewertung EUR", pnl.fx_revaluation_eur],
         ["Drawdown", run.drawdown],
       ]));
-      if (run.chart && run.chart.eligible) paper.append(lineChart(run.chart.points, ledger.currency));
-      else paper.append(unavailable(run.chart && run.chart.reason_de || "Keine echte Papierkurve."));
+      if (run.chart && run.chart.eligible) {
+        paper.append(el("p", "empty", "Equity, Netto und Drawdown aus dem Lauf. Lokaler Hash, keine externe Beglaubigung."));
+        paper.append(lineChart(run.chart.points, ledger.currency));
+        if (run.chart.gaps) paper.append(el("p", "empty", "Lücken in der Equity: " + run.chart.gaps + ". Die Linie wird darüber nicht verbunden."));
+      } else paper.append(unavailable(run.chart && run.chart.reason_de || "Keine echte Papierkurve."));
     });
   }
   const orders = document.querySelector("#orders");

@@ -6,11 +6,23 @@ import copy
 import hashlib
 import json
 import socket
+import ssl
 import sys
 import unittest
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
+
+
+def ssl_verify_required():
+    return ssl.CERT_REQUIRED
+
+
+def ssl_context_unverified():
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
 
 import paper_sim as sim
 
@@ -225,6 +237,143 @@ class SimulatorTest(unittest.TestCase):
             self.assertEqual(summary["native_decision"], "pending")
             self.assertFalse(summary["authenticated"])
             self.assertEqual(summary["runtime_integration"], False)
+
+    def test_official_info_transport_is_opt_in_and_mocked(self):
+        import paper_capture as cap
+        import urllib.request
+        sleeps = []
+        calls = []
+
+        class Response:
+            def __init__(self, body, status=200, headers=None, final=None):
+                self.status = status
+                self.headers = headers or {}
+                self._body = json.dumps(body).encode()
+                self._final = final
+            def read(self, _limit):
+                return self._body
+            def geturl(self):
+                return self._final or calls[-1].full_url
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                return False
+
+        def body_for(payload):
+            kind = payload["type"]
+            if kind == "meta":
+                return {"universe": [{"name": "BTC"}]}
+            if kind == "metaAndAssetCtxs":
+                return [{"universe": [{"name": "BTC"}]}, [{"markPx": "100", "oraclePx": "100"}]]
+            if kind == "l2Book":
+                return {"coin": "BTC", "time": 1000, "levels": [[{"px": "100", "sz": "1"}], [{"px": "101", "sz": "1"}]]}
+            if kind == "candleSnapshot":
+                return [
+                    {"t": 0, "T": 3599999, "s": "BTC", "o": "100", "h": "110", "l": "90", "c": "105"},
+                    {"t": 3600000, "T": 7199999, "s": "BTC", "o": "105", "h": "106", "l": "104"},
+                    {"t": 7200000, "T": 10799999, "s": "BTC", "o": "104", "h": "108", "l": "100", "c": "107"},
+                ]
+            raise AssertionError(kind)
+
+        def opener(request, timeout):
+            self.assertEqual(request.get_method(), "POST")
+            self.assertEqual(request.full_url, "https://api.hyperliquid.xyz/info")
+            self.assertNotIn("Authorization", request.headers)
+            self.assertLessEqual(timeout, cap.MAX_TIMEOUT_S)
+            payload = json.loads(request.data)
+            self.assertNotIn("user", payload)
+            calls.append(request)
+            return Response(body_for(payload))
+
+        with patch("socket.socket", side_effect=AssertionError("socket")), patch("urllib.request.urlopen", side_effect=AssertionError("urlopen")), patch("sys.stdout"):
+            self.assertEqual(cap.main(["--execute-observation", "--base-url", "https://api.hyperliquid.xyz", "--coin", "BTC"]), 2)
+            self.assertEqual(cap.main(["--execute-observation", "--confirm-public-info", "--base-url", "https://evil.example", "--coin", "BTC", "--output", "unused"]), 2)
+            self.assertEqual(cap.main(["--execute-observation", "--confirm-public-info", "--base-url", "http://api.hyperliquid.xyz", "--coin", "BTC", "--output", "unused"]), 2)
+            self.assertEqual(cap.main(["--execute-observation", "--confirm-public-info", "--base-url", "https://api.hyperliquid.xyz:4443", "--coin", "BTC", "--output", "unused"]), 2)
+            self.assertEqual(cap.main(["--execute-observation", "--confirm-public-info", "--base-url", "https://api.hyperliquid.xyz/" + "exchange", "--coin", "BTC", "--output", "unused"]), 2)
+            self.assertEqual(cap.main(["--execute-observation", "--confirm-public-info", "--include", "clearinghouseState", "--base-url", "https://api.hyperliquid.xyz", "--coin", "BTC", "--output", "unused"]), 2)
+        self.assertFalse(calls)
+        with self.assertRaises(sim.NetworkDenied):
+            cap._RefuseRedirect().redirect_request(None, None, 302, "Found", [], "https://evil.example/" + "exchange")
+        with self.assertRaises(sim.NetworkDenied):
+            opener_denied = unittest.mock.Mock()
+            cap.exchange("https://api.hyperliquid.xyz", {"type": "meta", "signature": "00"}, 5, opener_denied)
+        self.assertFalse(opener_denied.called)
+        with self.assertRaises(sim.NetworkDenied):
+            cap.exchange("https://api.hyperliquid.xyz", {"type": "l2Book", "coin": "BTC"}, 5, lambda request, timeout: Response({}, status=302, headers={"Location": "https://evil.example/info"}, final="https://api.hyperliquid.xyz/info"))
+        with self.assertRaises(sim.NetworkDenied):
+            cap.exchange("https://api.hyperliquid.xyz", {"type": "meta"}, 5, lambda request, timeout: Response({}, status=200, headers={"Set-Cookie": "a=b"}, final="https://api.hyperliquid.xyz/info"))
+        with patch.dict("os.environ", {"https_proxy": "http://127.0.0.1:9", "HTTPS_PROXY": "http://127.0.0.1:9"}, clear=False):
+            transport = cap.build_official_opener()
+        self.assertEqual(transport.context.verify_mode, ssl_verify_required())
+        self.assertTrue(transport.context.check_hostname)
+        self.assertFalse(any(isinstance(handler, urllib.request.ProxyHandler) for handler in transport.opener.handlers))
+        broken = ssl_context_unverified()
+        with patch("paper_capture.ssl.create_default_context", return_value=broken):
+            with self.assertRaises(sim.NetworkDenied):
+                cap.build_official_opener()
+        parameters = {"coin": "BTC", "include": ["l2Book", "candleSnapshot"], "max_requests": 4, "purpose": "bounded_snapshot", "window": {"interval": "1h", "startTime": 0, "endTime": 7_200_000}}
+        bundle = cap.capture_official("https://api.hyperliquid.xyz", parameters, opener, "2026-11-08T00:00:00Z", timeout=5, sleeper=lambda delay: sleeps.append(delay), clock=lambda: 20, wall_ms=lambda: 20000)
+        self.assertEqual(bundle["evidence_class"], "observed_public_info")
+        self.assertFalse(bundle["externally_authenticated"])
+        self.assertFalse(bundle["claims_market_evidence"])
+        self.assertEqual(bundle["hash_scope"], cap.HASH_SCOPE)
+        self.assertEqual(sleeps, [1])
+        self.assertEqual(next(record["local_receipt_ms"] for record in bundle["records"] if record["request"]["type"] == "l2Book"), 20000)
+        fresh = cap.capture_official("https://api.hyperliquid.xyz", {"coin": "BTC", "include": ["l2Book"], "max_requests": 1, "purpose": "bounded_snapshot"}, opener, "2026-11-08T00:00:00Z", timeout=5, sleeper=lambda delay: sleeps.append(delay), clock=lambda: 0, wall_ms=lambda: 1000)
+        self.assertEqual(fresh["records"][0]["local_receipt_ms"], 1000)
+        self.assertTrue(all(call.full_url == "https://api.hyperliquid.xyz/info" for call in calls))
+        converted = cap.fixture_to_tape(bundle)
+        self.assertEqual(converted["evidence_class"], "observed_public_info")
+        self.assertFalse(converted["externally_authenticated"])
+        self.assertNotIn("trade", {event["type"] for event in converted["events"]})
+        self.assertNotIn("funding", {event["type"] for event in converted["events"]})
+        harness = cap.mark_test_harness(bundle)
+        self.assertIn("TEST-ONLY", harness["test_label"])
+        self.assertFalse(harness["collection_performed"])
+        cap.validate_observed_bundle(harness)
+        mutated = json.loads(json.dumps(bundle))
+        mutated["records"][0]["body"]["time"] = 1
+        with self.assertRaises(sim.PaperError):
+            cap.validate_observed_bundle(mutated)
+        with self.assertRaises(sim.PaperError) as duplicate:
+            cap.plan_requests({"coin": "BTC", "include": ["meta", "meta"], "max_requests": 2, "purpose": "bounded_snapshot"})
+        self.assertIn("duplicate", str(duplicate.exception))
+        opened = []
+        def bounded(request, timeout):
+            opened.append(request.full_url)
+            return opener(request, timeout)
+        with self.assertRaises(sim.PaperError):
+            cap.capture_official("https://api.hyperliquid.xyz", {"coin": "BTC", "include": ["meta", "l2Book"], "max_requests": 2, "purpose": "bounded_snapshot"}, bounded, "2026-11-08T00:00:00Z", timeout=5, sleeper=lambda delay: sleeps.append(("late", delay)), clock=iter((0, 0, 100)).__next__)
+        self.assertEqual(opened, ["https://api.hyperliquid.xyz/info"])
+        import tempfile
+        from argparse import Namespace
+        with tempfile.TemporaryDirectory() as temporary, patch("paper_capture.build_official_opener", return_value=opener), patch("paper_capture.time.sleep", return_value=None), patch("socket.socket", side_effect=AssertionError("socket")), patch("sys.stdout"):
+            destination = Path(temporary) / "obs"
+            args = Namespace(confirm_public_info=True, base_url="https://api.hyperliquid.xyz", output=destination, coin="BTC", max_requests=4, include="meta,l2Book", interval=None, start_ms=None, end_ms=None, timeout=5)
+            self.assertEqual(cap.execute_observation(args), 0)
+            self.assertTrue((destination / "manifest.json").is_file())
+            saved = json.loads((destination / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved["network_execution"], "public_info_post")
+            self.assertFalse(saved["externally_authenticated"])
+        events = [
+            book(1, 1000, [("99", "2")], [("101", "2")]),
+            {"sequence": 2, "type": "gap", "exchange_time_ms": 1500, "local_receipt_ms": 1500, "start_ms": 1200, "end_ms": 1400},
+            book(3, 2000, [("99", "2")], [("101", "2")]),
+        ]
+        captured = base_config()
+        captured["evidence_class"] = "captured_public_replay"
+        captured["source_network"] = "mainnet"
+        captured["market"]["coin"] = "ETH"
+        document = tape(events)
+        document["evidence_class"] = "captured_public_replay"
+        result = sim.replay(captured, document, sim.decisions_document(captured, []))
+        self.assertTrue(result["report"]["chart"]["eligible"])
+        self.assertFalse(result["report"]["chart"]["externally_authenticated"])
+        self.assertTrue(any(point["gap_before"] for point in result["report"]["chart"]["points"]))
+        self.assertEqual(result["report"]["pnl_breakdown"]["net_quote"], "0")
+        self.assertEqual(result["report"]["drawdown"], "0")
+        self.assertFalse(result["report"]["claims_market_evidence"])
 
     def test_schema_and_cli_are_offline(self):
         self.assertEqual(sim.schema()["network_access"], "none")

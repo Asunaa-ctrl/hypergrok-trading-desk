@@ -93,7 +93,7 @@ SUPPORTED = [
     "explicit protection mode recorded_exits_only or stop_mark, priority before discretionary decisions",
     "cash-secured linear perp without leverage; taker book walk; conservative maker queue or unsupported maker",
     "hourly funding only with oracle and rate on the payment event",
-    "public /info allowlist for an injected transport; no transport is opened by the CLI",
+    "public /info allowlist for an injected transport; paper_sim itself opens no socket",
 ]
 UNIMPLEMENTED = [
     "no runtime connection to Desk Lead or any Bot; native acknowledgement is pending",
@@ -103,7 +103,7 @@ UNIMPLEMENTED = [
     "no leverage, cross margin, isolated margin, or liquidation engine",
     "no automatic protection policy; absence rejects new exposure instead of inventing a stop",
     "no claim that public L2 is queue position or that candles contain the intrabar path",
-    "live public collection is not enabled; the CLI never opens a socket",
+    "paper_sim opens no socket; paper_capture posts public /info only after --confirm-public-info",
     "human trade-reviewer grading is not run; the process journal is mechanical",
 ]
 LIMITATIONS = [
@@ -1874,12 +1874,18 @@ class Simulator:
         })
 
     def _chart(self):
-        eligible = self.cfg["evidence_class"] == "captured_public_replay" and self.cfg["claims_market_evidence"] and self.cfg.get("quote_enabled", True) and self.funding_status != "unavailable" and not self.gaps
+        observed = self.cfg["evidence_class"] == "captured_public_replay"
+        enabled = self.cfg.get("quote_enabled", True)
+        funding_ok = self.funding_status != "unavailable"
+        eligible = observed and enabled and funding_ok and bool(self.equity_points)
         return {
             "eligible": eligible,
+            "externally_authenticated": False,
             "gap_policy": "lines_are_not_connected_across_gaps",
+            "gaps": self.gaps,
+            "hash_scope": "local_sha256_not_external_notary",
             "points": self.equity_points if eligible else [],
-            "reason_de": "Aufgezeichnete Papierpunkte." if eligible else "Keine echte Papierbeobachtung. Eine Kurve wird nicht gezeichnet.",
+            "reason_de": "Aufgezeichnete Papierpunkte. Lokaler Hash, keine externe Beglaubigung." if eligible else "Keine echte Papierbeobachtung. Eine Kurve wird nicht gezeichnet.",
             "slippage_included_in_equity": False,
         }
 

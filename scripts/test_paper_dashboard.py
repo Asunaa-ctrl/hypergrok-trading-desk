@@ -138,6 +138,11 @@ class DashboardTest(unittest.TestCase):
             self.assertEqual(status["paper"]["runs"][0]["ledger"]["cash"], "10000")
             self.assertFalse(status["paper"]["runs"][0]["claims_market_evidence"])
             self.assertFalse(status["paper"]["runs"][0]["judge_provenance"]["authenticated"])
+            self.assertTrue(status["paper"]["runs"][0]["chart"]["eligible"])
+            self.assertFalse(status["paper"]["runs"][0]["chart"]["externally_authenticated"])
+            self.assertTrue(status["paper"]["runs"][0]["chart"]["points"])
+            self.assertEqual(status["paper"]["runs"][0]["pnl_breakdown"]["net_quote"], "0")
+            self.assertEqual(status["paper"]["runs"][0]["drawdown"], "0")
             self.assertEqual(len(status["engineering"]["synthetic_runs"]), 1)
             report_path = root / "runs" / "captured-empty" / "report.json"
             report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -150,6 +155,79 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual(forged["paper"]["message_de"], "Noch kein Paper-Durchlauf gestartet")
         self.assertEqual(forged["engineering"]["conflicts"][0]["note_de"], "Widersprüchliche Dateien. Kein Kontostand aus diesem Ordner.")
         self.assertNotIn("ledger", forged["engineering"]["conflicts"][0])
+
+    def test_observed_schema_renders_and_synthetic_fixture_stays_out(self):
+        import paper_capture as cap
+        import tempfile
+        parameters = {"coin": "BTC", "include": ["l2Book", "candleSnapshot"], "max_requests": 4, "purpose": "bounded_snapshot", "window": {"interval": "1h", "startTime": 0, "endTime": 7_200_000}}
+        calls = []
+
+        class Response:
+            def __init__(self, body):
+                self.status = 200
+                self.headers = {}
+                self._body = json.dumps(body).encode()
+            def read(self, _limit):
+                return self._body
+            def geturl(self):
+                return calls[-1].full_url
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                return False
+
+        def opener(request, timeout):
+            payload = json.loads(request.data)
+            calls.append(request)
+            if payload["type"] == "l2Book":
+                body = {"coin": "BTC", "time": 1000, "levels": [[{"px": "100", "sz": "2"}], [{"px": "101", "sz": "2"}]]}
+            else:
+                body = [
+                    {"t": 0, "T": 3599999, "o": "100", "h": "110", "l": "90", "c": "105"},
+                    {"t": 3600000, "o": "105", "h": "106", "l": "100"},
+                    {"t": 7200000, "T": 10799999, "o": "104", "h": "108", "l": "100", "c": "107"},
+                ]
+            return Response(body)
+
+        bundle = cap.capture_official("https://api.hyperliquid.xyz", parameters, opener, "2026-11-08T00:00:00Z", timeout=5, sleeper=lambda _delay: None, clock=lambda: 20, wall_ms=lambda: 20000)
+        harness = cap.mark_test_harness(bundle)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "captures" / "loopback").mkdir(parents=True)
+            (root / "captures" / "loopback" / "manifest.json").write_text(json.dumps({"evidence_class": "loopback_fixture", "records": [{"retrieved_at_utc": "2026-11-08T00:00:00Z", "request": {"type": "candleSnapshot"}, "body": [{"t": 0, "o": "9", "h": "9", "l": "9", "c": "9"}]}]}), encoding="utf-8")
+            (root / "engineering").mkdir()
+            (root / "engineering" / "synthetic_market.json").write_text(json.dumps({"evidence_class": "synthetic_engineering_fixture", "candles": [{"t": 1, "o": "1", "h": "2", "l": "1", "c": "2", "source": "synthetic fixture"}], "book": {"bids": [{"px": "1", "sz": "1"}], "asks": [{"px": "2", "sz": "1"}], "source": "synthetic fixture"}}), encoding="utf-8")
+            (root / "captures" / "test-schema").mkdir()
+            (root / "captures" / "test-schema" / "manifest.json").write_text(json.dumps(harness), encoding="utf-8")
+            status = dash.scan(root)
+            self.assertTrue(status["market"]["test_harness"])
+            self.assertIn("TEST-ONLY", status["market"]["test_label"])
+            self.assertFalse(status["market"]["externally_authenticated"])
+            self.assertFalse(status["market"]["collection_performed"])
+            self.assertEqual(status["market"]["gap_count"], 1)
+            self.assertEqual(status["market"]["missing_candles"], 1)
+            self.assertTrue(status["market"]["book"]["stale"])
+            self.assertEqual(status["market"]["book"]["bids"][0]["px"], "100")
+            drawn = [row for row in status["market"]["candles"] if not row.get("gap")]
+            self.assertEqual([row["c"] for row in drawn], ["105", "107"])
+            self.assertNotIn("9", [row.get("c") for row in status["market"]["candles"]])
+            self.assertEqual(status["engineering"]["fixture_market"]["candles"][0]["source"], "synthetic fixture")
+            self.assertFalse(status["engineering"]["fixture_market"]["plotted_as_market"])
+            (root / "captures" / "test-schema" / "manifest.json").unlink()
+            (root / "captures" / "mocked-schema").mkdir()
+            (root / "captures" / "mocked-schema" / "manifest.json").write_text(json.dumps(bundle), encoding="utf-8")
+            mocked = dash.scan(root)
+            self.assertFalse(mocked["market"]["test_harness"])
+            self.assertTrue(mocked["market"]["collection_performed"])
+            self.assertFalse(mocked["market"]["externally_authenticated"])
+            self.assertEqual(mocked["market"]["hash_scope"], cap.HASH_SCOPE)
+            broken = json.loads(json.dumps(bundle))
+            broken["externally_authenticated"] = True
+            (root / "captures" / "mocked-schema" / "manifest.json").write_text(json.dumps(broken), encoding="utf-8")
+            refused = dash.scan(root)
+            self.assertEqual(refused["market"]["candles"], [])
+            self.assertIsNone(refused["market"]["book"])
+            self.assertTrue(refused["market"]["invalid_bundle"])
 
 
 if __name__ == "__main__":

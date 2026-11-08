@@ -10,17 +10,17 @@ Nach der Prüfung auf gefälschte Urteile, Zustandsrennen, Ledger, Lookahead, Ma
 
 ```text
 python3 scripts/test_paper_sim.py
-# Ran 21 tests — OK
+# Ran 25 tests — OK
 
 python3 scripts/test_paper_dashboard.py
-# Ran 4 tests — OK
+# Ran 6 tests — OK
 
 bash scripts/check.sh
 # ok: 17 skills, 7 agents, 68 markdown files
 # Passed 18 read-only CLI journeys
 ```
 
-Neue Abhängigkeiten: keine. Die 21 Simulator-Tests schließen jetzt ein: geändertes Urteil ohne Provenance-Hash führt nicht aus; geänderte judge_id wird abgelehnt; ein späteres frisches Buch füllt nicht zum veralteten Preis; eine Finanzierung nach der gebundenen Version blockiert die wartende Order; Manifest, Ledger und Journal, die nach dem Schreiben geändert werden, scheitern bei `--verify-run`; Replay öffnet keinen Socket.
+Neue Abhängigkeiten: keine. Die Simulator-Tests schließen ein: geändertes Urteil ohne Provenance-Hash führt nicht aus; geänderte judge_id wird abgelehnt; ein späteres frisches Buch füllt nicht zum veralteten Preis; eine Finanzierung nach der gebundenen Version blockiert die wartende Order; Manifest, Ledger und Journal, die nach dem Schreiben geändert werden, scheitern bei `--verify-run`; Replay öffnet keinen Socket. Der offizielle `/info`-Transport wird nur mit Mock-HTTP geprüft. Dieser Lauf hat `api.hyperliquid.xyz` nicht aufgerufen.
 
 ## Screenshots
 
@@ -48,12 +48,25 @@ Plantext-Hash `6bed075e4bfb4dc7db7520aa9db4492339b6bab49be07fa2d52b2410da1342aa`
 | --- | --- |
 | Vorlage 100 EUR, Taker, BTC, 3 Tage oder 5 Trades, Strategie/Exit ungewählt | implementiert, `validate_paper_template`, nicht gestartet |
 | Loopback-Capture, Redirect/Host/Exchange-Sperre, Offline-Umwandlung | implementiert, `paper_capture.capture_loopback`, `fixture_to_tape`, `main --observe-plan` |
-| Offizieller Host-Abruf | in diesem Build abgelehnt, `collection_not_enabled` |
+| Offizieller Host-Abruf | implementiert, opt-in, Standard aus. `paper_capture.execute_observation` nach `--confirm-public-info`. POST nur `https://api.hyperliquid.xyz/info` oder Testnet `/info`, TLS-Prüfung, keine Redirects, kein Proxy, höchstens 8 Requests, 1 s Abstand, 60 s Wandzeit. Ohne Bestätigung `collection_not_confirmed` und kein Socket. In diesem Lauf nicht ausgeführt |
 | Datei-Handoff ohne Bot-API | implementiert, `export_handoff`, `import_decisions` |
-| Equity/Kerzen-Zeichnung | implementiert; synthetische Serien nur in der Engineering-Fläche, Marktfläche bleibt leer |
+| Equity/Kerzen/Buch | implementiert für ein geprüftes `observed_public_info`-Schema und für einen `captured_public_replay`-Lauf: Kerzen, Buch, Equity, Netto, Drawdown, Lücken, fehlende Kerzen, veraltetes Buch. Lokaler SHA-256, `externally_authenticated` falsch. Synthetische Fixtures bleiben in der Engineering-Fläche. Ohne Datei bleibt die Marktfläche leer |
 | FX-Kurs, native Entscheidung, echter Lauf | fehlen, blockieren den Start |
 
-Beweisbild, nur Agentenrechner: `/opt/cursor/artifacts/papier-terminal-beweis.png`
+Spätere Beobachtung, nur durch den Koordinator und nicht in diesem Lauf:
+
+```bash
+python3 scripts/paper_capture.py --observe-plan --coin BTC --max-requests 4
+python3 scripts/paper_capture.py --execute-observation --confirm-public-info \
+  --base-url https://api.hyperliquid.xyz --coin BTC --max-requests 4 --timeout 5 \
+  --output ../paper-data/captures/btc-obs-1
+python3 scripts/paper_capture.py --to-tape ../paper-data/captures/btc-obs-1/manifest.json \
+  --output ../paper-data/tapes/btc-obs-1.json
+```
+
+Der erste Befehl öffnet keinen Socket. Der zweite ist der einzige öffentliche Lesezugriff. Er wählt keine Strategie und öffnet keine Exposition.
+
+Beweisbilder, nur Agentenrechner: `/opt/cursor/artifacts/papier-markt-leer.png` zeigt die leere Marktfläche. `/opt/cursor/artifacts/papier-testschema.png` zeigt die TEST-ONLY-Schemazeichnung und ist kein externer Abruf.
 
 ## Vorlage, nicht gestartet
 
@@ -80,7 +93,7 @@ Neue Terminalbilder, nur auf dem Agentenrechner:
 - Keine Laufzeitverbindung zum Desk Lead oder zu einem anderen Bot.
 - Kein Live-Judge, kein Hindsight, kein Konto, keine Signatur, kein Auftrag auf Mainnet oder Testnet.
 - Kein Hebel, kein Cross-/Isolated-Margin, keine Liquidation, keine Trigger-Orders, kein Spot.
-- Keine Live-Datensammlung. Die öffentliche `/info`-Allowlist hat keinen mitgelieferten Socket.
+- Kein automatischer Sammler und kein in diesem Lauf ausgeführter Abruf. Der spätere Befehl ist ausdrücklich `--execute-observation --confirm-public-info` und öffnet keine Exposition.
 - Keine menschliche Review-Note. Das Prozessjournal ist mechanisch und bewertet PnL nicht.
 - Öffentliches L2 beweist keine Queue. Kerzen enthalten keinen Intrabar-Pfad und kein historisches Oracle.
 
