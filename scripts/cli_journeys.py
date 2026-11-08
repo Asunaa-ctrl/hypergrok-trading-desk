@@ -65,6 +65,12 @@ def main():
             invalid = command(name, "--json", "--timeout", "nan", "--base-url", base, expected=2)
             assert invalid["mode"] == "read-only" and invalid["error"]["code"] == "invalid_arguments"
             checked += 2
+        for name in ("paper_sim", "paper_dashboard"):
+            schema = command(name, "--schema")
+            assert schema["schema_version"] == 1 and schema["network_access"] == "none", schema
+            invalid = command(name, "--json", expected=2)
+            assert invalid["error"]["code"] == "invalid_arguments"
+            checked += 2
         assert not requests, "Schema and invalid requests must not access any API"
         doctor = command("desk_doctor", "--offline", "--json", "--base-url", base)
         assert all(check["status"] != "FAIL" for check in doctor["checks"])
@@ -95,7 +101,7 @@ def main():
             assert tampered["error"]["code"] == "verification_failed"
             checked += 3
         assert not failures, failures
-        print(f"Passed {checked} read-only CLI journeys: schemas, invalid input, offline doctor, market read, risk sizing, dataset collection/replay/tamper refusal; only loopback POST /info used.")
+        print(f"Passed {checked} read-only CLI journeys: schemas, invalid input, offline doctor, market read, risk sizing, dataset collection/replay/tamper refusal, local paper schema; only loopback POST /info used.")
     finally:
         server.shutdown()
         server.server_close()

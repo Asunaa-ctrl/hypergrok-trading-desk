@@ -18,6 +18,9 @@ The Risk Manager posts a ticket with an id like `HG-20260816-01`. You type `appr
 **Where do the ideas come from?**
 From you. The Strategist turns your idea into rules and tests it on Hyperliquid history with fees, funding and an out-of-sample split; the desk then paper-trades it on testnet if you like. The Market and Research Analysts give you the picture; you decide.
 
+**Is local paper the same as testnet?**
+No. [Local paper](LOCAL_PAPER.md) is an in-process hypothetical ledger. It does not sign, send, or read an account on mainnet or testnet. A recorded APPROVE in that tool is not the phrase that approves an exchange ticket. Testnet practice stays on the normal lifecycle: Risk PASS, your approval by ticket id, and one Execution Trader send. Passing a local engineering test does not validate a strategy.
+
 **Can I verify the history behind a backtest?**
 Yes. The [research dataset tool](RESEARCH_DATASETS.md) saves requests, decoded responses, CSVs and a manifest with file hashes and coverage gaps. `--verify` replays that bundle offline. A missing candle or funding hour prevents complete coverage; absent funding is never assumed to be zero. Integrity and coverage do not prove source authenticity, strategy edge or exact USD funding costs without historical oracle prices.
 

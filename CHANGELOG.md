@@ -2,6 +2,8 @@
 
 ## Unreleased
 
++ Add a local paper simulator and a localhost read-only dashboard. Hypothetical fills, fees, funding and decision envelopes stay in process. The tool does not read an account, sign, or send to mainnet or testnet. Recorded APPROVE/REJECT envelopes are replayed; a fresh judge is not called. The existing Desk Lead role is cited, not replaced, and a supplied judge id is not authenticated authority. No strategy, capital, risk limit or protection policy is selected by the software. Engineering tests use synthetic fixtures and are not market evidence.
+
 ## 1.7.1 - 2026-11-01
 
 + Explain HIP-3 equity readings while the underlying market is closed: distinguish API price references from an official close, pair mark/oracle divergence with liquidity, retain DEX identity and hourly funding history, and preserve zero versus unavailable external rates. Keep observations separate from executable prices and return claims.

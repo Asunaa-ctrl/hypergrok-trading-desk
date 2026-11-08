@@ -123,6 +123,8 @@ python3 scripts/test_check_grok_template.py
 python3 scripts/test_release_bump.py
 python3 scripts/test_check_public_template.py
 python3 scripts/test_stop_cost.py
+python3 scripts/test_paper_sim.py
+python3 scripts/test_paper_dashboard.py
 python3 scripts/test_exchange_write_gate.py
 
 # Verify the published arithmetic without loading a wallet or SDK.

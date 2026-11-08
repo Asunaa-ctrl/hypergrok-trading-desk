@@ -57,6 +57,8 @@ The Market Analyst hands the complete bundle to the Strategist, who runs offline
 
 Data completeness, statistical evidence, Risk PASS and a user's exact ticket approval are separate decisions. The dataset tool does not supply historical oracle prices, reconstruct intrabar fills, read an account or touch an exchange write path.
 
+`scripts/paper_sim.py` is a separate local-paper process. It replays an explicit config and recorded decision envelopes into a hypothetical cash-secured ledger. It does not open a socket, read an account, or send to either network. The existing Desk Lead remains the role named for a local entry or exit decision; this repository does not create a Bot, does not change that role file, and does not treat a `judge_id` string as authenticated authority. See [Local paper](LOCAL_PAPER.md). Testnet paper trading in the lifecycle is unchanged and is not this tool.
+
 ## Trust boundaries
 
 **Reads.** Six Bots use `POST /info` and public web pages without signing keys.
