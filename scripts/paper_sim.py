@@ -78,6 +78,9 @@ REASONS_DE = {
     "berlin_time_mismatch": "Die Berlin-Zeit weicht von der UTC-Entscheidungszeit ab.",
     "policy_trigger": "Die eingefrorene Schutzpolitik hat ausgelöst. Das ist kein Judge-Urteil.",
     "gates_passed": "Alle geprüften lokalen Tore sind erfüllt. Das ist keine Strategievalidierung.",
+    "pending_strategy": "Es ist keine Nutzerstrategie hinterlegt. Es wird keine Strategie erfunden.",
+    "pending_native_decision": "Eine native Entscheidung liegt nicht vor. Es wird kein Urteil erzeugt.",
+    "fx_unavailable": "Ohne datierten belegten Wechselkurs bleibt das EUR-Budget unkonvertiert. Nutzbares USDC-Quote ist nicht verfügbar.",
     "cancelled": "Die lokale Order wurde vor einer weiteren Ausführung storniert.",
     "expired_order": "Die lokale Order ist nach ihrer eigenen Frist abgelaufen.",
     "awaiting_fresh_book": "Die Order wartet auf ein frisches Buch und wurde nicht gefüllt.",
@@ -269,7 +272,7 @@ def validate_config(raw):
     keys = {
         "schema_version", "mode", "run_id", "evidence_class", "claims_market_evidence",
         "source_network", "requires_complete_coverage", "research_bundle", "market",
-        "capital", "risk", "fees", "execution", "evaluation", "strategy", "protection",
+        "capital", "risk", "fees", "fx", "execution", "evaluation", "strategy", "protection",
         "judge", "decision_source",
     }
     need_keys(raw, keys, "config")
@@ -278,15 +281,16 @@ def validate_config(raw):
     if raw["decision_source"] != "recorded_envelopes":
         raise PaperError("unsupported", "only recorded_envelopes is a decision source; a live Bot is not called")
     evidence = raw["evidence_class"]
-    if evidence not in ("synthetic_engineering_fixture", "captured_public_replay"):
+    if evidence not in ("synthetic_engineering_fixture", "captured_public_replay", "loopback_fixture"):
         raise PaperError("config_incomplete", "evidence_class is not a known local class")
     if type(raw["claims_market_evidence"]) is not bool or type(raw["requires_complete_coverage"]) is not bool:
         raise PaperError("config_incomplete", "evidence flags must be booleans")
-    if evidence == "synthetic_engineering_fixture":
+    if evidence in ("synthetic_engineering_fixture", "loopback_fixture"):
         if raw["claims_market_evidence"] or raw["requires_complete_coverage"] or raw["research_bundle"] is not None:
-            raise PaperError("config_incomplete", "a synthetic fixture cannot claim market evidence or cite a bundle")
-        if raw["source_network"] != "offline":
-            raise PaperError("config_incomplete", "synthetic fixtures are offline")
+            raise PaperError("config_incomplete", "a fixture cannot claim market evidence or cite a bundle")
+        expected_network = "loopback" if evidence == "loopback_fixture" else "offline"
+        if raw["source_network"] != expected_network:
+            raise PaperError("config_incomplete", "fixture network label does not match its evidence class")
     else:
         if raw["source_network"] not in ("mainnet", "testnet"):
             raise PaperError("config_incomplete", "captured replay must name mainnet or testnet")
@@ -317,8 +321,10 @@ def validate_config(raw):
         raise PaperError("config_incomplete", "allow_dust_reduce_only must be boolean")
     capital = raw["capital"]
     need_keys(capital, ["starting_cash", "currency"], "capital")
-    if capital["currency"] != "USDC":
-        raise PaperError("unsupported", "starting currency must be USDC for this model")
+    if capital["currency"] not in ("USDC", "EUR"):
+        raise PaperError("unsupported", "budget currency must be USDC or EUR; it is not silently converted")
+    budget_cash = money(capital["starting_cash"], "starting_cash", positive=True)
+    fx_status, usable_quote = _fx(raw["fx"], capital["currency"], budget_cash)
     risk = raw["risk"]
     need_keys(risk, ["max_position_base", "max_notional_usd", "max_loss_usd"], "risk")
     fees = raw["fees"]
@@ -352,18 +358,24 @@ def validate_config(raw):
         if type(evaluation[name]) is not int or evaluation[name] < 0:
             raise PaperError("config_incomplete", f"{name} must be a nonnegative integer")
     strategy = raw["strategy"]
-    need_keys(strategy, ["id", "rules_ref", "rules_hash", "interface"], "strategy")
-    need_text(strategy["id"], "strategy.id")
-    if not isinstance(strategy["rules_ref"], str) or not strategy["rules_ref"].strip():
-        raise PaperError("config_incomplete", "strategy.rules_ref is required and is not opened or fetched")
-    if not isinstance(strategy["rules_hash"], str) or len(strategy["rules_hash"]) != 64:
-        raise PaperError("config_incomplete", "strategy.rules_hash must be a caller-supplied sha256 hex string")
-    try:
-        int(strategy["rules_hash"], 16)
-    except ValueError as exc:
-        raise PaperError("config_incomplete", "strategy.rules_hash must be hexadecimal") from exc
+    need_keys(strategy, ["status", "id", "rules_ref", "rules_hash", "interface"], "strategy")
     if strategy["interface"] != "tape_intents":
         raise PaperError("unsupported", "only tape_intents is supported; no strategy is loaded or invented")
+    if strategy["status"] == "pending":
+        if any(strategy[key] is not None for key in ("id", "rules_ref", "rules_hash")):
+            raise PaperError("config_incomplete", "a pending strategy must not invent an id or a rules hash")
+    elif strategy["status"] == "supplied":
+        need_text(strategy["id"], "strategy.id")
+        if not isinstance(strategy["rules_ref"], str) or not strategy["rules_ref"].strip():
+            raise PaperError("config_incomplete", "strategy.rules_ref is required and is not opened or fetched")
+        if not isinstance(strategy["rules_hash"], str) or len(strategy["rules_hash"]) != 64:
+            raise PaperError("config_incomplete", "strategy.rules_hash must be a caller-supplied sha256 hex string")
+        try:
+            int(strategy["rules_hash"], 16)
+        except ValueError as exc:
+            raise PaperError("config_incomplete", "strategy.rules_hash must be hexadecimal") from exc
+    else:
+        raise PaperError("config_incomplete", "strategy.status must be pending or supplied")
     protection = _protection(raw["protection"])
     judge = raw["judge"]
     need_keys(judge, ["declared_id", "role_ref", "authority"], "judge")
@@ -386,7 +398,12 @@ def validate_config(raw):
         "quantum": Decimal(1).scaleb(-sz),
         "min_notional": money(market["min_notional_usd"], "min_notional_usd", positive=True),
         "allow_dust": market["allow_dust_reduce_only"],
-        "starting_cash": money(capital["starting_cash"], "starting_cash", positive=True),
+        "budget_cash": budget_cash,
+        "budget_currency": capital["currency"],
+        "fx_status": fx_status,
+        "usable_quote": usable_quote,
+        "starting_cash": budget_cash if capital["currency"] == "USDC" else (usable_quote if usable_quote is not None else Decimal(0)),
+        "quote_enabled": capital["currency"] == "USDC" or usable_quote is not None,
         "max_position": money(risk["max_position_base"], "max_position_base", positive=True),
         "max_notional": money(risk["max_notional_usd"], "max_notional_usd", positive=True),
         "max_loss": money(risk["max_loss_usd"], "max_loss_usd", positive=True),
@@ -412,6 +429,129 @@ def validate_config(raw):
     if parsed["participation"] > 1:
         raise PaperError("config_incomplete", "participation_ratio cannot exceed the visible size")
     return parsed
+
+
+def _fx(value, currency, budget):
+    """Map a budget into venue USDC only with an explicit dated citation. Never assume USD equals USDC."""
+    if not isinstance(value, dict) or "status" not in value:
+        raise PaperError("config_incomplete", "fx.status is required")
+    if currency == "USDC":
+        need_keys(value, ["status", "reason", "usd_usdc"], "fx")
+        if value["status"] != "not_applicable" or value["usd_usdc"] != "not_used":
+            raise PaperError("config_incomplete", "a USDC budget is the venue quote and is not an FX conversion")
+        if not isinstance(value["reason"], str) or len(value["reason"]) < 8:
+            raise PaperError("config_incomplete", "fx.reason must say why no conversion is applied")
+        return "not_applicable", budget
+    if currency != "EUR":
+        raise PaperError("unsupported", "budget currency is not supported")
+    need_keys(value, ["status", "reason", "pair", "rate", "as_of", "source_ref", "usd_usdc_status", "usd_usdc_rate", "usd_usdc_as_of", "usd_usdc_source_ref"], "fx")
+    if not isinstance(value["reason"], str) or len(value["reason"]) < 8:
+        raise PaperError("config_incomplete", "fx.reason is required")
+    if value["status"] == "unavailable":
+        if value["usd_usdc_status"] != "unavailable":
+            raise PaperError("config_incomplete", "unavailable EUR FX cannot claim a USD/USDC rate")
+        if any(value[key] is not None for key in ("pair", "rate", "as_of", "source_ref", "usd_usdc_rate", "usd_usdc_as_of", "usd_usdc_source_ref")):
+            raise PaperError("config_incomplete", "unavailable FX must not contain an invented rate")
+        return "unavailable", None
+    if value["status"] != "cited":
+        raise PaperError("config_incomplete", "fx.status must be unavailable or cited for EUR")
+    pair = value["pair"]
+    rate = money(value["rate"], "fx.rate", positive=True)
+    if not isinstance(value["as_of"], str) or len(value["as_of"]) < 10:
+        raise PaperError("config_incomplete", "fx.as_of must be an explicit date")
+    if not isinstance(value["source_ref"], str) or len(value["source_ref"]) < 8:
+        raise PaperError("config_incomplete", "fx.source_ref must cite the rate; it is not fetched")
+    if pair == "EUR/USDC":
+        if value["usd_usdc_status"] != "not_applicable" or any(value[key] is not None for key in ("usd_usdc_rate", "usd_usdc_as_of", "usd_usdc_source_ref")):
+            raise PaperError("config_incomplete", "an EUR/USDC citation has no separate USD leg")
+        return "cited", budget * rate
+    if pair != "EUR/USD":
+        raise PaperError("unsupported", "FX pair must be EUR/USD or EUR/USDC")
+    if value["usd_usdc_status"] == "unavailable":
+        return "usd_known_usdc_unavailable", None
+    if value["usd_usdc_status"] != "cited":
+        raise PaperError("config_incomplete", "USD/USDC must be cited or explicitly unavailable; 1:1 is not assumed")
+    usd_usdc = money(value["usd_usdc_rate"], "usd_usdc_rate", positive=True)
+    if not isinstance(value["usd_usdc_as_of"], str) or len(value["usd_usdc_as_of"]) < 10:
+        raise PaperError("config_incomplete", "usd_usdc_as_of is required")
+    if not isinstance(value["usd_usdc_source_ref"], str) or len(value["usd_usdc_source_ref"]) < 8:
+        raise PaperError("config_incomplete", "usd_usdc_source_ref is required")
+    if usd_usdc == 1:
+        raise PaperError("config_incomplete", "a USD/USDC rate of 1 is not accepted as an implicit parity assumption")
+    return "cited", budget * rate * usd_usdc
+
+
+def validate_paper_template(raw):
+    """Validate the explicit 100 EUR paper template. This does not start a run or select a strategy."""
+    keys = {
+        "auto_start", "campaign", "capital", "execution", "exit", "fx", "ledger_quote",
+        "mode", "observation", "paper_limits", "readiness", "schema_version", "status",
+        "strategy", "training",
+    }
+    need_keys(raw, keys, "paper template")
+    if raw["schema_version"] != SCHEMA_VERSION or raw["mode"] != "paper_config_template":
+        raise PaperError("unsupported", "template mode must be paper_config_template")
+    if raw["status"] != "template_not_a_run" or raw["auto_start"] is not False or raw["training"] != "not_run":
+        raise PaperError("config_incomplete", "the template must stay unrun, with training not started")
+    capital = raw["capital"]
+    need_keys(capital, ["starting_cash", "currency"], "template capital")
+    if capital["currency"] != "EUR" or capital["starting_cash"] != "100.00":
+        raise PaperError("config_incomplete", "the selected virtual budget is 100.00 EUR and is not rewritten")
+    if raw["ledger_quote"] != "USDC":
+        raise PaperError("config_incomplete", "the venue ledger quote is USDC and is not the EUR budget")
+    fx = raw["fx"]
+    need_keys(fx, ["eur_usd", "usdc_usd"], "template fx")
+    eur, usdc = fx["eur_usd"], fx["usdc_usd"]
+    need_keys(eur, ["status", "source_identity", "rate", "as_of"], "eur_usd")
+    need_keys(usdc, ["status", "rate", "source_ref", "parity_assumed"], "usdc_usd")
+    if eur["status"] != "required_uncited" or eur["rate"] is not None or eur["as_of"] is not None:
+        raise PaperError("config_incomplete", "no EUR/USD rate is stored in the template")
+    if not isinstance(eur["source_identity"], str) or "ECB" not in eur["source_identity"]:
+        raise PaperError("config_incomplete", "EUR/USD source identity is the named reference, not a fetched rate")
+    if usdc["status"] != "unavailable" or usdc["rate"] is not None or usdc["source_ref"] is not None or usdc["parity_assumed"] is not False:
+        raise PaperError("config_incomplete", "USDC/USD is unavailable and 1:1 is not a default")
+    observation = raw["observation"]
+    need_keys(observation, ["market", "phase", "opens_exposure"], "observation")
+    if observation["market"] != "BTC" or observation["phase"] != "observation_first" or observation["opens_exposure"] is not False:
+        raise PaperError("config_incomplete", "BTC observation comes first and opens no exposure")
+    strategy = raw["strategy"]
+    need_keys(strategy, ["status", "id", "rules_ref", "rules_hash"], "template strategy")
+    if strategy["status"] != "required_unselected" or any(strategy[key] is not None for key in ("id", "rules_ref", "rules_hash")):
+        raise PaperError("config_incomplete", "strategy stays required and unselected")
+    exit_policy = raw["exit"]
+    need_keys(exit_policy, ["status", "policy_id"], "template exit")
+    if exit_policy["status"] != "required_unselected" or exit_policy["policy_id"] is not None:
+        raise PaperError("config_incomplete", "exit policy stays required and unselected")
+    execution = raw["execution"]
+    need_keys(execution, ["order_types", "maker_fills"], "template execution")
+    if execution["order_types"] != "taker_only" or execution["maker_fills"] != "disabled":
+        raise PaperError("unsupported", "this template is taker-only")
+    limits = raw["paper_limits"]
+    need_keys(limits, ["absolute_usdc", "authority", "daily_loss_stop", "live_desk_limits_unchanged", "max_gross_notional_multiple", "max_markets", "max_open_risk", "max_positions", "max_risk_per_trade", "run_kill_drawdown", "unit"], "paper limits")
+    if limits["authority"] != "coordinator_selected_under_user_planning_delegation" or limits["live_desk_limits_unchanged"] is not True:
+        raise PaperError("config_incomplete", "paper limits are not live desk limits")
+    if limits["absolute_usdc"] is not None or limits["unit"] != "fraction_of_virtual_equity":
+        raise PaperError("config_incomplete", "limits stay fractions until a cited FX conversion exists")
+    expected = {"max_risk_per_trade": "0.005", "max_open_risk": "0.01", "max_gross_notional_multiple": "1", "daily_loss_stop": "0.02", "run_kill_drawdown": "0.05"}
+    for key, value in expected.items():
+        if limits[key] != value:
+            raise PaperError("config_incomplete", f"{key} is not the selected conservative paper fraction")
+    if limits["max_positions"] != 1 or limits["max_markets"] != 1:
+        raise PaperError("config_incomplete", "one position and one market")
+    campaign = raw["campaign"]
+    need_keys(campaign, ["ignored_alternatives", "max_calendar_days", "max_sim_trades", "started", "then", "whichever_first"], "campaign")
+    if campaign["max_calendar_days"] != 3 or campaign["max_sim_trades"] != 5 or campaign["whichever_first"] is not True or campaign["started"] is not False or campaign["then"] != "stop_for_review":
+        raise PaperError("config_incomplete", "the first bound is 3 days or 5 simulated trades, then stop")
+    if campaign["ignored_alternatives"] != ["14 calendar days", "20 simulated trades"]:
+        raise PaperError("config_incomplete", "the 14-day and 20-trade example is not the bound")
+    readiness = raw["readiness"]
+    need_keys(readiness, ["later_start_authorized_when_gates_pass", "plan_status", "ready", "unavailable"], "template readiness")
+    if readiness["plan_status"] != "planning_evidence_not_readiness" or readiness["ready"] is not False or readiness["later_start_authorized_when_gates_pass"] is not True:
+        raise PaperError("config_incomplete", "the plan is not readiness and the template is not ready")
+    required_missing = {"strategy", "exit", "eur_usd_rate", "usdc_usd_rate", "native_handoff", "bounded_live_run"}
+    if set(readiness["unavailable"]) != required_missing:
+        raise PaperError("config_incomplete", "unavailable gates must stay listed and unresolved")
+    return {"ready": False, "run_started": False, "training": "not_run", "budget": "100.00 EUR", "usable_usdc_quote": None}
 
 
 def _protection(value):
@@ -1350,6 +1490,12 @@ class Simulator:
             self._record(order.intent, env, order.reason, True)
 
     def _gate(self, order, env, time_ms):
+        if self.cfg["strategy"].get("status") != "supplied":
+            return "pending_strategy"
+        if not self.cfg.get("quote_enabled", True):
+            return "fx_unavailable"
+        if not self.source.envelopes:
+            return "pending_native_decision"
         if env["run_id"] != self.cfg["run_id"] or env["judge_id"] != self.cfg["judge_id"]:
             return "judge_id_mismatch" if env["judge_id"] != self.cfg["judge_id"] else "hash_mismatch"
         hashes = env["hashes"]
@@ -1715,6 +1861,30 @@ class Simulator:
             "time_ms": event.get("exchange_time_ms"),
         })
 
+    def _chart(self):
+        eligible = self.cfg["evidence_class"] == "captured_public_replay" and self.cfg["claims_market_evidence"] and self.cfg.get("quote_enabled", True) and self.funding_status != "unavailable" and not self.gaps
+        return {
+            "eligible": eligible,
+            "gap_policy": "lines_are_not_connected_across_gaps",
+            "points": self.equity_points if eligible else [],
+            "reason_de": "Aufgezeichnete Papierpunkte." if eligible else "Keine echte Papierbeobachtung. Eine Kurve wird nicht gezeichnet.",
+            "slippage_included_in_equity": False,
+        }
+
+    def _breakdown(self, gross, net, slippage):
+        enabled = self.cfg.get("quote_enabled", True)
+        return {
+            "eur_pnl": None,
+            "fees": dec_str(self.fees) if enabled else None,
+            "funding": None if self.funding_status == "unavailable" or not enabled else dec_str(self.funding_posted),
+            "fx_revaluation_eur": None,
+            "gross_quote": None if gross is None else dec_str(gross),
+            "market_pnl_quote": None if net is None else dec_str(net),
+            "net_quote": None if net is None else dec_str(net),
+            "slippage_in_net": False,
+            "slippage_quote": None if slippage is None or not enabled else dec_str(slippage),
+        }
+
     def _reconcile(self):
         expected_cash = self.cfg["starting_cash"] - self.buy_notional + self.sell_notional - self.fees + self.funding_posted
         expected_position = sum((money(fill["qty"], "qty") if fill.get("side") == "buy" else -money(fill["qty"], "qty") for _o in [] ), Decimal(0))
@@ -1752,7 +1922,7 @@ class Simulator:
         funding_claim = None if self.funding_status == "unavailable" else dec_str(self.funding_posted)
         net = None
         gross = None
-        if equity is not None and self.funding_status != "unavailable":
+        if self.cfg.get("quote_enabled", True) and equity is not None and self.funding_status != "unavailable":
             net = equity - self.cfg["starting_cash"]
             gross = net - self.funding_posted + self.fees
         slippage_known = all(order.slippage_known for order in self.order_list if order.fills)
@@ -1802,16 +1972,35 @@ class Simulator:
             "funding": {"claimed": funding_claim, "missing": self.funding_gaps, "posted": dec_str(self.funding_posted), "status": self.funding_status},
             "gross_pnl": None if gross is None else dec_str(gross),
             "judge_provenance": role_provenance(self.cfg["judge_id"]),
+            "budget": {"amount": dec_str(self.cfg["budget_cash"]), "currency": self.cfg["budget_currency"]},
+            "chart": self._chart(),
+            "fx": {
+                "revaluation_eur": None,
+                "status": self.cfg["fx_status"],
+                "usable_quote": None if self.cfg["usable_quote"] is None else dec_str(self.cfg["usable_quote"]),
+                "usable_quote_currency": "USDC",
+                "usd_usdc_assumed_one": False,
+            },
             "ledger": {
                 "average_price": None if self.average is None else dec_str(self.average),
-                "cash": dec_str(self.cash),
-                "currency": "USDC",
-                "equity": None if equity is None else dec_str(equity),
+                "budget_cash": dec_str(self.cfg["budget_cash"]),
+                "budget_currency": self.cfg["budget_currency"],
+                "cash": None if not self.cfg.get("quote_enabled", True) else dec_str(self.cash),
+                "currency": "USDC" if self.cfg.get("quote_enabled", True) else None,
+                "equity": None if equity is None or not self.cfg.get("quote_enabled", True) else dec_str(equity),
                 "mark": None if self.mark is None else dec_str(self.mark),
                 "position": dec_str(self.position),
-                "realized": dec_str(self.realized),
-                "starting_cash": dec_str(self.cfg["starting_cash"]),
-                "unrealized": None if unrealized is None else dec_str(unrealized),
+                "realized": dec_str(self.realized) if self.cfg.get("quote_enabled", True) else None,
+                "starting_cash": dec_str(self.cfg["starting_cash"]) if self.cfg.get("quote_enabled", True) else None,
+                "unrealized": None if unrealized is None or not self.cfg.get("quote_enabled", True) else dec_str(unrealized),
+            },
+            "native_decision": "pending" if not self.source.envelopes else "imported_file_unauthenticated",
+            "pnl_breakdown": self._breakdown(gross, net, slippage),
+            "readiness": {
+                "authorized_later": True,
+                "started": False,
+                "training": "not_run",
+                "unavailable": [item for item in ("strategy" if self.cfg["strategy"].get("status") != "supplied" else "", "fx" if self.cfg["budget_currency"] == "EUR" and self.cfg["fx_status"] != "cited" else "", "native_risk_and_judge_handoff" if not self.source.envelopes else "", "bounded_live_run") if item],
             },
             "limitations": LIMITATIONS,
             "mode": "local_paper",
@@ -1959,6 +2148,7 @@ def main(argv=None):
     parser = ReadOnlyParser(prog="paper_sim", description="Replay a local paper run from explicit config and recorded decisions.", machine_readable=json_mode)
     parser.add_argument("--schema", action="store_true")
     parser.add_argument("--validate-config", type=Path)
+    parser.add_argument("--validate-template", type=Path)
     parser.add_argument("--replay", action="store_true")
     parser.add_argument("--verify-run", type=Path)
     parser.add_argument("--config", type=Path)
@@ -1970,6 +2160,10 @@ def main(argv=None):
     try:
         if args.schema:
             print(json.dumps(schema(), indent=2, sort_keys=True))
+            return 0
+        if args.validate_template:
+            report = validate_paper_template(load_exact(args.validate_template))
+            print(json.dumps({"schema_version": SCHEMA_VERSION, "mode": "paper_config_template", **report}, indent=2, sort_keys=True))
             return 0
         if args.validate_config:
             parsed = validate_config(load_exact(args.validate_config))

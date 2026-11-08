@@ -1,0 +1,49 @@
+{
+  "auto_start": false,
+  "campaign": {
+    "ignored_alternatives": ["14 calendar days", "20 simulated trades"],
+    "max_calendar_days": 3,
+    "max_sim_trades": 5,
+    "started": false,
+    "then": "stop_for_review",
+    "whichever_first": true
+  },
+  "capital": {"currency": "EUR", "starting_cash": "100.00"},
+  "execution": {"maker_fills": "disabled", "order_types": "taker_only"},
+  "exit": {"policy_id": null, "status": "required_unselected"},
+  "fx": {
+    "eur_usd": {
+      "as_of": null,
+      "rate": null,
+      "source_identity": "ECB euro foreign exchange reference rates page, named only; no rate copied",
+      "status": "required_uncited"
+    },
+    "usdc_usd": {"parity_assumed": false, "rate": null, "source_ref": null, "status": "unavailable"}
+  },
+  "ledger_quote": "USDC",
+  "mode": "paper_config_template",
+  "observation": {"market": "BTC", "opens_exposure": false, "phase": "observation_first"},
+  "paper_limits": {
+    "absolute_usdc": null,
+    "authority": "coordinator_selected_under_user_planning_delegation",
+    "daily_loss_stop": "0.02",
+    "live_desk_limits_unchanged": true,
+    "max_gross_notional_multiple": "1",
+    "max_markets": 1,
+    "max_open_risk": "0.01",
+    "max_positions": 1,
+    "max_risk_per_trade": "0.005",
+    "run_kill_drawdown": "0.05",
+    "unit": "fraction_of_virtual_equity"
+  },
+  "readiness": {
+    "later_start_authorized_when_gates_pass": true,
+    "plan_status": "planning_evidence_not_readiness",
+    "ready": false,
+    "unavailable": ["bounded_live_run", "eur_usd_rate", "exit", "native_handoff", "strategy", "usdc_usd_rate"]
+  },
+  "schema_version": 1,
+  "status": "template_not_a_run",
+  "strategy": {"id": null, "rules_hash": null, "rules_ref": null, "status": "required_unselected"},
+  "training": "not_run"
+}

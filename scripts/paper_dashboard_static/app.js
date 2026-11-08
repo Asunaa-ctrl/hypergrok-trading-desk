@@ -1,11 +1,8 @@
 "use strict";
 
 const filter = document.querySelector("#record-filter");
-const refreshButton = document.querySelector("#refresh");
-let latest = null;
-
-filter.addEventListener("change", () => { if (latest) render(latest); });
-refreshButton.addEventListener("click", () => { load(); });
+document.querySelector("#refresh").addEventListener("click", load);
+filter.addEventListener("change", () => { if (window.latestStatus) render(window.latestStatus); });
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -14,14 +11,9 @@ function el(tag, className, text) {
   return node;
 }
 
-function badge(className, text) {
-  return el("span", "badge " + className, text);
-}
-
-function fundingLabel(funding) {
-  if (!funding || funding.status === "unavailable" || funding.claimed == null) return "nicht verfügbar";
-  if (funding.status === "not_due") return "nicht fällig";
-  return String(funding.claimed);
+function money(value, currency) {
+  if (value == null || value === "") return "nicht verfügbar";
+  return String(value) + (currency ? " " + currency : "");
 }
 
 function definition(pairs) {
@@ -32,156 +24,224 @@ function definition(pairs) {
   return list;
 }
 
-function decisionList(decisions) {
-  const box = el("div");
-  if (!decisions.length) {
-    box.append(el("p", null, "Keine aufgezeichnete Entscheidung."));
-    return box;
-  }
-  for (const item of decisions) {
-    box.append(definition([
-      ["Art", item.kind || "unbekannt"],
-      ["Aufgezeichnet", item.recorded_verdict || "keine"],
-      ["Ausgeführt", item.action_taken ? "ja, simuliert" : "nein"],
-      ["Grund", item.reason_de || item.reason_code || "nicht verfügbar"],
-      ["Erklärung", item.explanation || ""],
-    ]));
-  }
-  return box;
+function unavailable(text) {
+  return el("p", "empty", text);
 }
 
-function equityTable(points) {
-  if (!points.length) return el("p", null, "Keine Equity-Punkte im Bericht.");
-  const wrap = el("div", "wrap");
-  const table = document.createElement("table");
-  const head = document.createElement("tr");
-  head.append(el("th", null, "Ereigniszeit (ms)"), el("th", null, "Simulierte Equity"));
-  table.append(head);
-  for (const point of points) {
-    const row = document.createElement("tr");
-    row.append(el("td", null, String(point.time_ms)), el("td", null, String(point.equity)));
-    table.append(row);
-  }
-  wrap.append(table);
+function lineChart(points, currency) {
+  const usable = (points || []).filter((point) => point && point.equity != null && point.gap_before !== true);
+  if (!usable.length) return unavailable("Keine aufgezeichnete Papierkurve. Nicht verfügbar.");
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "chart");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Equity in " + (currency || "Quote") + ", nur aufgezeichnete Punkte, Lücken nicht verbunden");
+  const values = usable.map((point) => Number(point.equity));
+  if (values.some((value) => !Number.isFinite(value))) return unavailable("Equity-Punkte sind nicht numerisch. Keine Kurve.");
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  let segment = [];
+  const segments = [];
+  (points || []).forEach((point, index) => {
+    if (!point || point.equity == null || point.gap_before === true) {
+      if (segment.length) segments.push(segment);
+      segment = point && point.equity != null && point.gap_before === true ? [index] : [];
+      return;
+    }
+    segment.push(index);
+  });
+  if (segment.length) segments.push(segment);
+  const flat = (points || []).filter((point) => point && point.equity != null);
+  segments.forEach((indexes) => {
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+    const coords = indexes.map((index) => {
+      const point = points[index];
+      const x = (flat.indexOf(point) / Math.max(flat.length - 1, 1)) * 100;
+      const y = 100 - ((Number(point.equity) - min) / span) * 100;
+      return x + "," + y;
+    }).join(" ");
+    line.setAttribute("points", coords);
+    line.setAttribute("fill", "none");
+    line.setAttribute("stroke", "#e0a15a");
+    line.setAttribute("stroke-width", "1.5");
+    line.setAttribute("vector-effect", "non-scaling-stroke");
+    svg.append(line);
+  });
+  svg.setAttribute("viewBox", "0 0 100 100");
+  svg.setAttribute("preserveAspectRatio", "none");
+  const wrap = el("div");
+  wrap.append(svg, el("p", "empty", "Achse: Equity " + (currency || "Quote") + ". Slippage ist nicht in der Equity enthalten."));
   return wrap;
 }
 
-function renderRun(run) {
-  const card = el("article");
-  const title = el("h3", null, run.id || "Lauf");
-  card.append(title);
-  const flags = el("p");
-  flags.append(badge("badge-sim", "Simuliert"));
-  if (run.evidence_class === "synthetic_engineering_fixture") {
-    flags.append(badge("badge-synthetic", "Synthetisches Fixture — keine Marktdaten"));
-  }
-  if (!run.claims_market_evidence) flags.append(badge("badge-synthetic", "Kein Marktnachweis"));
-  flags.append(badge(run.accepted_experiment ? "badge-approve" : "badge-reject", run.accepted_experiment ? "Ledger stimmt; kein Strategieergebnis" : "Ledger oder Finanzierung unvollständig"));
-  card.append(flags);
-  if (!run.readable) {
-    card.append(el("p", null, "Dieser Ordner konnte nicht gelesen werden."));
-    return card;
-  }
-  const ledger = run.ledger || {};
-  card.append(definition([
-    ["Startguthaben", ledger.starting_cash],
-    ["Virtuelles Cash", ledger.cash],
-    ["Virtuelle Equity", ledger.equity],
-    ["Position", ledger.position],
-    ["Gebühren", run.fees],
-    ["Finanzierung", fundingLabel(run.funding)],
-    ["Slippage", run.slippage && run.slippage.amount != null ? run.slippage.amount : "nicht verfügbar"],
-    ["Drawdown", run.drawdown],
-    ["Netz", run.source_network],
-    ["Konfiguration", run.identifiers && run.identifiers.config_sha256],
-    ["Code", run.identifiers && run.identifiers.code_sha256],
-    ["Daten", run.identifiers && run.identifiers.data_sha256],
-    ["Journalkopf", run.identifiers && run.identifiers.journal_head],
-    ["Datei beobachtet", run.file_observed_at_utc],
-  ]));
-  if (run.errors && run.errors.length) {
-    const list = document.createElement("ul");
-    for (const error of run.errors) list.append(el("li", null, error.detail_de || error.code));
-    card.append(el("h4", null, "Lücken und Fehler"), list);
-  } else {
-    card.append(el("p", null, "Keine aufgezeichneten Datenfehler in diesem Bericht."));
-  }
-  card.append(el("h4", null, "Lokale Entscheidungen"), decisionList(run.decisions || []));
-  card.append(el("h4", null, "Equity aus dem Journal"), equityTable(run.equity_points || []));
-  return card;
+function candleChart(candles) {
+  if (!candles || !candles.length) return unavailable("Keine erfassten Kerzen. Es wird keine Kursreihe erfunden.");
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "chart");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Kerzen aus erfassten OHLC, Stand " + (candles[0].as_of || "ohne Zeitstempel"));
+  const highs = candles.map((row) => Number(row.h));
+  const lows = candles.map((row) => Number(row.l));
+  const min = Math.min(...lows);
+  const max = Math.max(...highs);
+  const span = max - min || 1;
+  candles.forEach((row, index) => {
+    const x = ((index + 0.5) / candles.length) * 100;
+    const y = (price) => 100 - ((Number(price) - min) / span) * 100;
+    const wick = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    wick.setAttribute("x1", x); wick.setAttribute("x2", x);
+    wick.setAttribute("y1", y(row.h)); wick.setAttribute("y2", y(row.l));
+    wick.setAttribute("stroke", "#a8a396");
+    wick.setAttribute("vector-effect", "non-scaling-stroke");
+    const body = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    body.setAttribute("x1", x); body.setAttribute("x2", x);
+    body.setAttribute("y1", y(row.o)); body.setAttribute("y2", y(row.c));
+    body.setAttribute("stroke", Number(row.c) >= Number(row.o) ? "#8fbf9f" : "#e08b8b");
+    body.setAttribute("stroke-width", "3");
+    body.setAttribute("vector-effect", "non-scaling-stroke");
+    svg.append(wick, body);
+  });
+  svg.setAttribute("viewBox", "0 0 100 100");
+  svg.setAttribute("preserveAspectRatio", "none");
+  const wrap = el("div");
+  wrap.append(svg, el("p", "empty", "Quelle: " + candles[0].source + ". Stand: " + (candles[0].as_of || "nicht verfügbar") + "."));
+  return wrap;
+}
+
+function bookLadder(book) {
+  if (!book) return unavailable("Kein beobachtetes Orderbuch. Historische Tiefe wird nicht rekonstruiert.");
+  const table = document.createElement("table");
+  const head = document.createElement("tr");
+  ["Seite", "Preis", "Größe"].forEach((label) => head.append(el("th", null, label)));
+  table.append(head);
+  (book.asks || []).slice(0, 8).forEach((level) => table.append(row("Ask", level)));
+  (book.bids || []).slice(0, 8).forEach((level) => table.append(row("Bid", level)));
+  const wrap = el("div");
+  wrap.append(table, el("p", "empty", "Quelle: " + (book.source || "Beobachtung") + ". Stand: " + (book.as_of || book.time || "nicht verfügbar") + "."));
+  return wrap;
+}
+
+function row(side, level) {
+  const line = document.createElement("tr");
+  line.append(el("td", null, side), el("td", null, String(level.px)), el("td", null, String(level.sz)));
+  return line;
 }
 
 function render(status) {
   document.querySelector("#disclaimer").textContent = status.disclaimer_de;
   document.querySelector("#judge-note").textContent = status.judge_note_de;
-  document.querySelector("#read-at").textContent = "Anzeige gelesen um " + status.read_at_utc + " UTC. Das ist die Lesezeit, kein Marktzeitpunkt.";
+  document.querySelector("#read-at").textContent = "Zuletzt gelesen " + status.read_at_utc + " UTC. Kein Dauerbetrieb.";
+  const collector = status.market.collector;
+  document.querySelector("#collector").replaceChildren(el("h2", null, "Sammler"), definition([
+    ["Zustand", collector.state],
+    ["Gesund", "nein"],
+    ["Zuletzt gesehen", collector.last_seen_utc],
+    ["Hinweis", collector.note_de],
+  ]));
+  const template = status.template || {};
+  const handoff = status.handoff || {};
+  const budgetAmount = template.present ? "100.00" : (handoff.budget && handoff.budget.amount);
+  const budgetCurrency = template.present ? "EUR" : (handoff.budget && handoff.budget.currency);
+  document.querySelector("#budget").replaceChildren(el("h2", null, "Budget"), definition([
+    ["Startbudget", template.present ? "100.00 EUR" : money(budgetAmount, budgetCurrency)],
+    ["Nutzbares USDC-Quote", template.present ? null : handoff.usable_quote],
+    ["EUR/USD", template.present ? "Quelle benannt, Kurs nicht belegt" : (handoff.fx_status || "nicht verfügbar")],
+    ["USDC/USD", template.present ? "nicht verfügbar, keine Parität" : "nicht verfügbar"],
+    ["Strategie", template.present ? "erforderlich, nicht ausgewählt" : (handoff.strategy_status || "nicht ausgewählt")],
+    ["Exit", template.present ? "erforderlich, nicht ausgewählt" : "nicht ausgewählt"],
+    ["Kampagne", template.present ? "nicht gestartet, maximal 3 Tage oder 5 Sim-Trades" : "keine"],
+  ]));
+  document.querySelector("#quality").replaceChildren(el("h2", null, "Qualität"), definition([
+    ["Vorlage bereit", template.present ? "nein" : "keine Vorlage"],
+    ["Training", "nicht gelaufen"],
+    ["Native Entscheidung", "ausstehend"],
+    ["Beobachtung", template.observation_market || "keine"],
+  ]));
+  document.querySelector("#candles").replaceChildren(el("h2", null, "Kurs"), candleChart(status.market.candles));
+  document.querySelector("#book").replaceChildren(el("h2", null, "Orderbuch"), bookLadder(status.market.book));
+  const paper = document.querySelector("#pnl");
+  paper.replaceChildren(el("h2", null, "Virtuelles Ergebnis"));
+  if (!status.paper.started) {
+    paper.append(el("p", null, status.paper.message_de));
+    paper.lastChild.id = "paper-empty";
+  } else {
+    status.paper.runs.forEach((run) => {
+      const ledger = run.ledger || {};
+      const pnl = run.pnl_breakdown || {};
+      paper.append(definition([
+        ["Budget", money(run.budget && run.budget.amount, run.budget && run.budget.currency)],
+        ["Quote-Cash", money(ledger.cash, ledger.currency)],
+        ["Equity", money(ledger.equity, ledger.currency)],
+        ["Realisiert", ledger.realized],
+        ["Unrealisiert", ledger.unrealized],
+        ["Netto Quote", pnl.net_quote],
+        ["Brutto Quote", pnl.gross_quote],
+        ["Gebühren", pnl.fees],
+        ["Finanzierung", pnl.funding],
+        ["Slippage, nicht in Equity", pnl.slippage_quote],
+        ["FX-Neubewertung EUR", pnl.fx_revaluation_eur],
+        ["Drawdown", run.drawdown],
+      ]));
+      if (run.chart && run.chart.eligible) paper.append(lineChart(run.chart.points, ledger.currency));
+      else paper.append(unavailable(run.chart && run.chart.reason_de || "Keine echte Papierkurve."));
+    });
+  }
+  const orders = document.querySelector("#orders");
+  orders.replaceChildren(el("h2", null, "Orders und Entscheidungen"));
+  const visible = status.paper.started ? status.paper.runs : [];
+  if (!visible.length) orders.append(unavailable("Keine aufgezeichnete Order."));
+  visible.forEach((run) => {
+    (run.orders_detail || []).forEach((order) => {
+      orders.append(definition([
+        ["Status", order.status],
+        ["Seite", order.side || ""],
+        ["Entscheidung", order.recorded_verdict],
+        ["Grund", order.reason_de || order.reason],
+      ]));
+    });
+    (run.decisions || []).forEach((item) => {
+      orders.append(definition([
+        ["Art", item.kind],
+        ["Aufgezeichnet", item.recorded_verdict],
+        ["Ausgeführt", item.action_taken ? "ja, simuliert" : "nein"],
+        ["Grund", item.reason_de],
+      ]));
+    });
+  });
+  const position = document.querySelector("#position");
+  position.replaceChildren(el("h2", null, "Position"));
+  if (!visible.length) position.append(unavailable("Keine Position."));
+  visible.forEach((run) => position.append(definition([
+    ["Basis", run.ledger && run.ledger.position],
+    ["Durchschnitt", run.ledger && run.ledger.average_price],
+    ["Mark", run.ledger && run.ledger.mark],
+  ])));
+  document.querySelector("#journal").replaceChildren(el("h2", null, "Journal"), unavailable(visible.length ? "Entscheidungen stehen bei den Orders. Ein menschliches Review ist nicht gelaufen." : "Kein Journal."));
   const engineering = document.querySelector("#engineering-body");
   engineering.replaceChildren();
   const counts = status.engineering.counts;
-  const list = document.createElement("ul");
-  list.className = "counts";
-  for (const [label, value] of [["Aufgezeichnet", counts.recorded], ["Bestanden", counts.passed], ["Fehlgeschlagen", counts.failed], ["Fehler", counts.errors]]) {
-    list.append(el("li", null, label + ": " + value));
-  }
-  engineering.append(list);
+  engineering.append(el("p", null, "Aufgezeichnet: " + counts.recorded + ". Bestanden: " + counts.passed + ". Fehlgeschlagen: " + counts.failed + ". Fehler: " + counts.errors + "."));
   const wanted = filter.value;
   const records = status.engineering.records.filter((record) => wanted === "all" || record.status === wanted);
   engineering.append(el("p", null, "Angezeigt " + records.length + " von " + counts.recorded + " aufgezeichneten Protokollen."));
-  if (!records.length) {
-    engineering.append(el("p", null, "Keine technischen Testprotokolle für diesen Filter."));
-  } else {
-    const table = document.createElement("table");
-    const head = document.createElement("tr");
-    for (const label of ["Protokoll", "Status", "Beleg"]) head.append(el("th", null, label));
-    table.append(head);
-    for (const record of records) {
-      const row = document.createElement("tr");
-      row.append(el("td", null, record.name || "ohne Name"), el("td", null, record.status || "unbekannt"), el("td", null, record.evidence_class === "synthetic_engineering_fixture" ? "Synthetisches Fixture" : (record.evidence_class || "unbekannt")));
-      table.append(row);
-    }
-    const wrap = el("div", "wrap");
-    wrap.append(table);
-    engineering.append(wrap);
+  if (status.engineering.synthetic_runs.length) {
+    engineering.append(el("p", null, "Erfundenes Fixture. Keine Kerzen und keine Papierkurve aus diesen Läufen."));
+    status.engineering.synthetic_runs.forEach((run) => engineering.append(definition([
+      ["Lauf", run.id],
+      ["Quote-Cash", run.ledger && run.ledger.cash],
+      ["Position", run.ledger && run.ledger.position],
+    ])));
   }
-  const conflicts = status.engineering.conflicts || [];
-  if (conflicts.length) {
-    engineering.append(el("h3", null, "Widersprüchliche Ordner"));
-    for (const conflict of conflicts) {
-      const card = el("article");
-      card.append(el("h3", null, conflict.id || "Ordner"));
-      card.append(el("p", null, conflict.note_de || "Widersprüchliche Dateien. Kein Kontostand aus diesem Ordner."));
-      const list = document.createElement("ul");
-      for (const error of conflict.errors || []) list.append(el("li", null, error.detail_de || error.code));
-      card.append(list);
-      engineering.append(card);
-    }
-  }
-  if (!status.engineering.synthetic_runs.length) {
-    engineering.append(el("p", null, "Kein synthetischer Simulatorlauf in diesem Ordner."));
-  } else {
-    engineering.append(el("h3", null, "Synthetische Simulatorläufe"));
-    engineering.append(el("p", null, "Erfundenes Fixture. Kein Paper-Durchlauf und kein erfasstes Marktzeugnis."));
-    for (const run of status.engineering.synthetic_runs) engineering.append(renderRun(run));
-  }
-  const paper = document.querySelector("#paper-body");
-  paper.replaceChildren();
-  if (!status.paper.started) {
-    paper.append(el("p", null, status.paper.message_de));
-    paper.firstChild.id = "paper-empty";
-    return;
-  }
-  paper.append(el("p", null, "Auch ein als Capture bezeichneter Lauf ist eine Simulation. Fehlender Marktnachweis bleibt fehlender Marktnachweis."));
-  for (const run of status.paper.runs) paper.append(renderRun(run));
 }
 
 async function load() {
-  const response = await fetch("/api/status", { cache: "no-store" });
+  const response = await fetch("/api/status", {cache: "no-store"});
   if (!response.ok) {
-    document.querySelector("#read-at").textContent = "Die Statusdatei konnte nicht gelesen werden.";
+    document.querySelector("#read-at").textContent = "Statusdatei nicht lesbar.";
     return;
   }
-  latest = await response.json();
-  render(latest);
+  window.latestStatus = await response.json();
+  render(window.latestStatus);
 }
 
 load();

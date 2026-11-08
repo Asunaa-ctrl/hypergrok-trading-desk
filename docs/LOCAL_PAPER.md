@@ -6,6 +6,10 @@ Testnet practice still uses the normal lifecycle: a Risk PASS, your approval by 
 
 The existing Desk Lead has acknowledged this local-paper mandate as role understanding. That acknowledgement is not an authenticated connection and this process does not call the Bot. The role file is unchanged and no new Bot is created. The id `a9a5e3d6-724d-44ab-bb6f-ce99f55ac11b` is only a declared string. Matching it does not authenticate a session. Replay never asks a model or a chat for a fresh verdict. An edited verdict or judge id that no longer matches its provenance hash is refused.
 
+## Paper template
+
+`scripts/fixtures/local_paper/paper_config_template.json` records the explicit unrun paper setup: 100.00 EUR virtual budget, USDC as the venue quote, no stored EUR/USD rate, USDC/USD unavailable and not assumed equal to USD, BTC observation that opens no exposure, taker-only, strategy and exit required but unselected, and a first bound of 3 days or 5 simulated trades. The 14-day and 20-trade example is not the bound. `python3 scripts/paper_sim.py --validate-template <file>` checks that file and does not start a run. A later start remains authorized only after the missing gates exist. This checkout does not deploy to another computer.
+
 ## What you must supply
 
 The config has no strategy, capital, fee, risk, latency, or protection default. Omit any of them and the run stops. A synthetic fixture cannot claim market evidence. Protection is either explicitly off, `recorded_exits_only`, or `stop_mark` for one side. With protection off, an entry that opens exposure is refused. Nothing here invents a stop price.

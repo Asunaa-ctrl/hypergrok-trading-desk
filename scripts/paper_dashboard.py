@@ -15,6 +15,7 @@ import sys
 from urllib.parse import urlsplit
 
 from cli_contract import ReadOnlyParser
+from paper_sim import PaperError, validate_paper_template
 
 HOST = "127.0.0.1"
 SCHEMA_VERSION = 1
@@ -95,6 +96,13 @@ def _run(directory):
         "drawdown": report.get("drawdown"),
         "drawdown_complete": report.get("drawdown_complete"),
         "orders": report.get("orders"),
+        "orders_detail": _orders(directory),
+        "chart": report.get("chart") or {"eligible": False, "points": [], "reason_de": "Keine echte Papierbeobachtung. Eine Kurve wird nicht gezeichnet.", "slippage_included_in_equity": False},
+        "pnl_breakdown": report.get("pnl_breakdown"),
+        "budget": report.get("budget"),
+        "fx": report.get("fx"),
+        "native_decision": report.get("native_decision") or "pending",
+        "readiness": report.get("readiness"),
         "decisions": report.get("decisions") or [],
         "data_quality": quality,
         "identifiers": {
@@ -136,6 +144,100 @@ def _errors(report):
     return found
 
 
+def _orders(directory):
+    path = directory / "orders.json"
+    try:
+        rows = _read_json(path)
+    except (OSError, json.JSONDecodeError, UnicodeError):
+        return []
+    return rows if isinstance(rows, list) else []
+
+
+def _market(root):
+    """Candles and books are plotted only from a non-fixture capture. Otherwise they stay empty."""
+    last_seen = None
+    fixture = False
+    for manifest in sorted(root.glob("captures/*/manifest.json")):
+        if manifest.is_symlink():
+            continue
+        try:
+            bundle = _read_json(manifest)
+        except (OSError, json.JSONDecodeError, UnicodeError):
+            continue
+        stamp = None
+        records = bundle.get("records") if isinstance(bundle, dict) else None
+        if isinstance(records, list) and records:
+            stamp = records[0].get("retrieved_at_utc")
+        if stamp and (last_seen is None or stamp > last_seen):
+            last_seen = stamp
+        if bundle.get("evidence_class") != "captured_public_replay":
+            fixture = True
+            continue
+        if bundle.get("network_execution") in (None, "not_performed", "loopback_only"):
+            fixture = True
+            continue
+        if bundle.get("claims_market_evidence") is not True:
+            continue
+        candles, book = _observed_market(bundle)
+        return _market_payload(candles, book, last_seen, False)
+    return _market_payload([], None, last_seen, fixture)
+
+
+def _observed_market(bundle):
+    candles, book = [], None
+    for record in bundle.get("records") or []:
+        request = record.get("request") or {}
+        body = record.get("body")
+        as_of = record.get("retrieved_at_utc")
+        if request.get("type") == "candleSnapshot" and isinstance(body, list):
+            for row in body:
+                if isinstance(row, dict) and all(row.get(key) not in (None, "") for key in ("t", "o", "h", "l", "c")):
+                    candles.append({"t": row["t"], "o": row["o"], "h": row["h"], "l": row["l"], "c": row["c"], "as_of": as_of, "source": "captured /info candleSnapshot"})
+        if request.get("type") == "l2Book" and isinstance(body, dict) and isinstance(body.get("levels"), list) and len(body["levels"]) == 2:
+            book = {"time": body.get("time"), "as_of": as_of, "bids": body["levels"][0], "asks": body["levels"][1], "source": "captured /info l2Book"}
+    return candles, book
+
+
+def _market_payload(candles, book, last_seen, fixture):
+    if last_seen is None:
+        collector = {"healthy": False, "last_seen_utc": None, "state": "stopped", "note_de": "Kein Sammlerlauf. Ein gestoppter Prozess oder ein ausgeschalteter Rechner ist nicht gesund und hat kein last-seen."}
+    else:
+        collector = {"healthy": False, "last_seen_utc": last_seen, "state": "last_seen_only", "note_de": "Nur der letzte gespeicherte Zeitstempel. Das ist kein laufender Sammler."}
+    return {
+        "book": book,
+        "book_reason_de": None if book else "Kein beobachtetes Orderbuch. Historische Tiefe wird nicht rekonstruiert.",
+        "candles": candles,
+        "candle_reason_de": None if candles else "Keine erfassten Kerzen. Es wird keine Kursreihe erfunden.",
+        "collector": collector,
+        "fixture_present": fixture,
+        "plotted": bool(candles or book),
+    }
+
+
+def _handoff(root):
+    path = root / "handoff" / "config.json"
+    if not path.is_file() or path.is_symlink():
+        return {"present": False, "budget": None, "fx_status": None, "usable_quote": None, "strategy_status": None, "native_decision": "pending"}
+    try:
+        config = _read_json(path)
+    except (OSError, json.JSONDecodeError, UnicodeError):
+        return {"present": False, "budget": None, "fx_status": "unreadable", "usable_quote": None, "strategy_status": None, "native_decision": "pending"}
+    capital = config.get("capital") if isinstance(config, dict) else {}
+    fx = config.get("fx") if isinstance(config, dict) else {}
+    strategy = config.get("strategy") if isinstance(config, dict) else {}
+    usable = None
+    if isinstance(fx, dict) and fx.get("status") == "cited" and capital.get("currency") == "USDC":
+        usable = capital.get("starting_cash")
+    return {
+        "present": True,
+        "budget": {"amount": capital.get("starting_cash"), "currency": capital.get("currency")},
+        "fx_status": fx.get("status") if isinstance(fx, dict) else None,
+        "usable_quote": usable,
+        "strategy_status": strategy.get("status") if isinstance(strategy, dict) else None,
+        "native_decision": "pending",
+    }
+
+
 def scan(root):
     root = Path(root)
     records = _jsonl(root / "engineering-tests.jsonl") if root.exists() else []
@@ -173,13 +275,28 @@ def scan(root):
                 "note_de": "Widersprüchliche Dateien. Kein Kontostand aus diesem Ordner.",
             } for item in conflicts],
         },
+        "handoff": _handoff(root),
+        "market": _market(root),
         "paper": {
             "label_de": "Phase 2 — Lokaler Paper-Durchlauf",
             "started": bool(paper),
             "message_de": None if paper else PAPER_EMPTY,
             "runs": paper,
         },
+        "template": _template(root),
     }
+
+
+def _template(root):
+    path = root / "paper_config_template.json"
+    if not path.is_file() or path.is_symlink():
+        return {"present": False, "ready": False, "run_started": False}
+    try:
+        raw = _read_json(path)
+        report = validate_paper_template(raw)
+    except (OSError, json.JSONDecodeError, UnicodeError, PaperError) as exc:
+        return {"present": True, "ready": False, "run_started": False, "error": str(exc)}
+    return {"present": True, **report, "observation_market": raw["observation"]["market"], "campaign": raw["campaign"], "fx_eur_usd": raw["fx"]["eur_usd"]["status"], "fx_usdc_usd": raw["fx"]["usdc_usd"]["status"], "strategy_status": raw["strategy"]["status"], "exit_status": raw["exit"]["status"]}
 
 
 class DashboardHandler(BaseHTTPRequestHandler):

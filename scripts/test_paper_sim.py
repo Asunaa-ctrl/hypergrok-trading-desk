@@ -52,7 +52,13 @@ def base_config():
             "embargo_ms": 0, "trial_id": "trial-fixture", "prior_trial_count": 2,
             "prior_holdout_access_count": 0,
         },
+        "fx": {
+            "status": "not_applicable",
+            "reason": "budget currency is already the venue USDC quote",
+            "usd_usdc": "not_used",
+        },
         "strategy": {
+            "status": "supplied",
             "id": "fixture-rules", "rules_ref": "synthetic rules label, not opened",
             "rules_hash": "a" * 64, "interface": "tape_intents",
         },
@@ -113,6 +119,67 @@ def cash_of(report):
 
 
 class SimulatorTest(unittest.TestCase):
+    def test_paper_template_stays_unselected_and_does_not_run(self):
+        path = ROOT / "scripts" / "fixtures" / "local_paper" / "paper_config_template.json"
+        report = sim.validate_paper_template(json.loads(path.read_text(encoding="utf-8")))
+        self.assertFalse(report["ready"])
+        self.assertFalse(report["run_started"])
+        self.assertIsNone(report["usable_usdc_quote"])
+        self.assertEqual(report["budget"], "100.00 EUR")
+        with patch("socket.socket", side_effect=AssertionError("socket")), patch("sys.stdout"):
+            self.assertEqual(sim.main(["--validate-template", str(path)]), 0)
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        with self.assertRaises(sim.PaperError):
+            sim.validate_config(raw)
+        for edit in (
+            ("campaign", "max_calendar_days", 14),
+            ("campaign", "max_sim_trades", 20),
+            ("execution", "maker_fills", "enabled"),
+            ("strategy", "status", "supplied"),
+            ("auto_start", None, True),
+        ):
+            forged = json.loads(path.read_text(encoding="utf-8"))
+            if edit[1] is None:
+                forged[edit[0]] = edit[2]
+            else:
+                forged[edit[0]][edit[1]] = edit[2]
+            with self.assertRaises(sim.PaperError):
+                sim.validate_paper_template(forged)
+        parity = json.loads(path.read_text(encoding="utf-8"))
+        parity["fx"]["usdc_usd"] = {"status": "cited", "rate": "1", "source_ref": "assumed parity", "parity_assumed": True}
+        with self.assertRaises(sim.PaperError):
+            sim.validate_paper_template(parity)
+
+    def test_eur_budget_is_not_silently_converted(self):
+        cfg = base_config()
+        cfg["capital"] = {"starting_cash": "100.00", "currency": "EUR"}
+        cfg["fx"] = {
+            "status": "unavailable", "reason": "no dated cited rate was supplied",
+            "pair": None, "rate": None, "as_of": None, "source_ref": None,
+            "usd_usdc_status": "unavailable", "usd_usdc_rate": None,
+            "usd_usdc_as_of": None, "usd_usdc_source_ref": None,
+        }
+        events = [book(1, 1000, [("99", "2")], [("101", "2")]), intent(2, 1000, px="101")]
+        result = run(events, lambda c, document: [envelope(c, document, events[1], evidence=[1])], cfg=cfg)
+        self.assertEqual(result["report"]["budget"]["currency"], "EUR")
+        self.assertEqual(Decimal(result["report"]["budget"]["amount"]), Decimal("100"))
+        self.assertIsNone(result["report"]["fx"]["usable_quote"])
+        self.assertIsNone(result["report"]["ledger"]["cash"])
+        self.assertIsNone(result["report"]["pnl_breakdown"]["eur_pnl"])
+        self.assertIsNone(result["report"]["pnl_breakdown"]["fx_revaluation_eur"])
+        self.assertFalse(result["report"]["fx"]["usd_usdc_assumed_one"])
+        self.assertEqual(result["report"]["ledger"]["position"], "0")
+        self.assertFalse(result["report"]["chart"]["eligible"])
+        self.assertIn("fx", result["report"]["readiness"]["unavailable"])
+        cfg["fx"]["status"] = "cited"
+        cfg["fx"]["pair"] = "EUR/USD"
+        cfg["fx"]["rate"] = "1.08"
+        cfg["fx"]["as_of"] = "2026-11-08"
+        cfg["fx"]["source_ref"] = "cited fixture rate, not fetched"
+        cfg["fx"]["usd_usdc_status"] = "unavailable"
+        held = sim.validate_config(cfg)
+        self.assertIsNone(held["usable_quote"])
+
     def test_schema_and_cli_are_offline(self):
         self.assertEqual(sim.schema()["network_access"], "none")
         self.assertFalse(sim.schema()["recommended_role"]["runtime_integration"])

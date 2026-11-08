@@ -40,6 +40,16 @@ Der Agent hat die Seite nur auf dem Loopback seines eigenen Remote-Rechners gele
 
 Damit die Oberfläche sichtbar wird, muss der Branch auf dem Rechner ausgecheckt werden, auf dem der Browser läuft. Dort, und nur dort, startet `python3 scripts/paper_dashboard.py --root <lokaler Ordner> --port 8765`. Der Browser auf demselben Rechner kann danach dessen Loopback öffnen. Ein anderer Rechner sieht diese Schleifenadresse nicht.
 
+## Vorlage, nicht gestartet
+
+`scripts/fixtures/local_paper/paper_config_template.json` ist die ungelaufene Papier-Vorlage: 100,00 EUR, USDC als Börsenquote, kein gespeicherter EUR/USD-Kurs, USDC/USD nicht verfügbar und nicht 1:1, BTC-Beobachtung ohne Exposition, nur Taker, Strategie und Exit erforderlich aber nicht ausgewählt, erste Grenze 3 Tage oder 5 simulierte Trades. Die 14-Tage- und 20-Trade-Angabe gilt nicht. `--validate-template` prüft die Datei und startet nichts. Ein späterer Start bleibt nur zulässig, wenn die offenen Tore wirklich belegt sind. Der Windows-Rechner wurde von hier nicht aktualisiert.
+
+Neue Terminalbilder, nur auf dem Agentenrechner:
+
+- `/opt/cursor/artifacts/papier-terminal-eur.png`
+- `/opt/cursor/artifacts/papier-terminal-synthetisch.png`
+- `/opt/cursor/artifacts/papier-terminal-mobil.png`
+
 ## Unterstützt
 
 - Aufgezeichnete Hüllen mit `APPROVE` oder `REJECT`, im Replay ohne neues Urteil.

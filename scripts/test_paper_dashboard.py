@@ -31,6 +31,28 @@ def artifact_root(tmp):
 
 
 class DashboardTest(unittest.TestCase):
+    def test_template_and_market_panels_do_not_invent_curves(self):
+        import shutil
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copy(ROOT / "scripts" / "fixtures" / "local_paper" / "paper_config_template.json", root / "paper_config_template.json")
+            status = dash.scan(root)
+        self.assertFalse(status["paper"]["started"])
+        self.assertEqual(status["template"]["budget"], "100.00 EUR")
+        self.assertIsNone(status["template"]["usable_usdc_quote"])
+        self.assertFalse(status["template"]["ready"])
+        self.assertEqual(status["market"]["candles"], [])
+        self.assertEqual(status["market"]["book"], None)
+        self.assertFalse(status["market"]["collector"]["healthy"])
+        self.assertIsNone(status["market"]["collector"]["last_seen_utc"])
+        page = (ROOT / "scripts" / "paper_dashboard_static" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("SIMULATION", page)
+        self.assertIn("PAPER", page)
+        self.assertNotIn(">Kaufen<", page)
+        self.assertNotIn(">Verkaufen<", page)
+        self.assertNotIn("password", page.lower())
+
     def test_empty_root_has_the_exact_paper_sentence_and_no_balance(self):
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:

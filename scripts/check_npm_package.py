@@ -36,13 +36,14 @@ RESOURCES = (
     "assets/hero.svg", "assets/hero-mobile.svg", "assets/desk-flow.svg", "assets/desk-flow-mobile.svg",
     "hooks/exchange-write-gate.json", "hooks/exchange_write_gate.py",
     "scripts/fixtures/local_paper/README.md",
+    "scripts/fixtures/local_paper/paper_config_template.json",
     "scripts/paper_dashboard_static/app.js", "scripts/paper_dashboard_static/index.html",
     "scripts/paper_dashboard_static/style.css",
 )
 SCRIPTS = (
     "check.sh", "check_grok_template.py", "check_manifests.py",
     "check_npm_package.py", "check_public_template.py", "cli_contract.py", "cli_journeys.py", "desk_doctor.py",
-    "opening_bell.py", "paper_dashboard.py", "paper_sim.py", "release_bump.py", "research_dataset.py", "stop_cost.py", "test_research_dataset.py", "test_check_grok_template.py", "test_check_manifests.py",
+    "opening_bell.py", "paper_capture.py", "paper_dashboard.py", "paper_sim.py", "release_bump.py", "research_dataset.py", "stop_cost.py", "test_research_dataset.py", "test_check_grok_template.py", "test_check_manifests.py",
     "test_check_npm_package.py", "test_check_public_template.py",
     "test_desk_doctor.py", "test_exchange_write_gate.py", "test_opening_bell.py", "test_order_rounding.py",
     "test_paper_dashboard.py", "test_paper_sim.py",

@@ -3,18 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>HyperGrok — lokales Papier</title>
+  <title>Papier-Terminal</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <a class="skip" href="#inhalt">Zum Inhalt</a>
-  <header class="banner">
-    <p class="eyebrow">HyperGrok · nur dieser Rechner · 127.0.0.1</p>
-    <h1>Lokales Papier</h1>
-    <p>Hypothetische Fills bleiben in diesem Prozess. Es wird kein Auftrag signiert oder an eine Börse gesendet. Testnet ist ein anderes System und wird hier nicht ersetzt.</p>
+  <p class="sim-banner" role="status">SIMULATION · PAPER · KEINE BÖRSE · KEIN KONTO</p>
+  <header class="top">
+    <div>
+      <p class="brand">Papier-Terminal</p>
+      <h1>Lokales Papier</h1>
+    </div>
+    <p id="read-at">Anzeige noch nicht gelesen.</p>
   </header>
   <main id="inhalt">
-    <p id="disclaimer" class="notice" role="note">Bestandene technische Tests prüfen nur die Software. Sie validieren keine Strategie und sind kein Marktbeweis.</p>
+    <p id="disclaimer" class="notice">Bestandene technische Tests prüfen nur die Software. Sie validieren keine Strategie und sind kein Marktbeweis.</p>
     <p id="judge-note" class="notice">Die Kenntnisnahme des Desk Lead ist nur Rollenverständnis. Die judge_id authentifiziert ihn nicht, und dieser Prozess kontaktiert keinen Bot.</p>
     <div class="toolbar">
       <button type="button" id="refresh">Anzeige aktualisieren</button>
@@ -26,30 +29,26 @@
           <option value="error">Nur Fehlerprotokolle</option>
         </select>
       </label>
-      <p id="read-at" class="meta">Anzeige noch nicht gelesen.</p>
     </div>
-    <div class="phases">
-      <section id="engineering" aria-labelledby="engineering-title">
-        <h2 id="engineering-title">Phase 1 — Entwicklung und technische Prüfung</h2>
-        <p class="phase-note">Zähler stammen nur aus geschriebenen Protokollzeilen und synthetischen Simulatorläufen.</p>
-        <div id="engineering-body"><p>Technische Protokolle werden gelesen.</p></div>
-      </section>
-      <section id="paper" aria-labelledby="paper-title">
-        <h2 id="paper-title">Phase 2 — Lokaler Paper-Durchlauf</h2>
-        <div id="paper-body"><p id="paper-empty">Noch kein Paper-Durchlauf gestartet</p></div>
-      </section>
-    </div>
-    <section aria-labelledby="commands-title">
-      <h2 id="commands-title">Lokal starten</h2>
-      <pre><code>python3 scripts/test_paper_sim.py --status-dir /pfad/zu/paper-daten
-python3 scripts/paper_sim.py --replay \
-  --config config.json --tape tape.json --decisions decisions.json \
-  --output /pfad/zu/paper-daten/runs/lauf-1
-python3 scripts/paper_dashboard.py --root /pfad/zu/paper-daten --port 8765</code></pre>
-      <p>Im Browser <span class="url">http://127.0.0.1:8765/</span> öffnen. Die Seite liest nur und startet keinen Lauf.</p>
+    <section class="status-grid" aria-label="Zustand">
+      <article id="collector"></article>
+      <article id="budget"></article>
+      <article id="quality"></article>
+    </section>
+    <section class="desk" aria-label="Terminal">
+      <article id="candles"><h2>Kurs</h2><p>Keine erfassten Kerzen.</p></article>
+      <article id="book"><h2>Orderbuch</h2><p>Kein beobachtetes Orderbuch.</p></article>
+      <article id="pnl"><h2>Virtuelles Ergebnis</h2><p id="paper-empty">Noch kein Paper-Durchlauf gestartet</p></article>
+      <article id="orders"><h2>Orders und Entscheidungen</h2><p>Keine aufgezeichnete Order.</p></article>
+      <article id="position"><h2>Position</h2><p>Keine Position.</p></article>
+      <article id="journal"><h2>Journal</h2><p>Kein Journal.</p></article>
+    </section>
+    <section id="engineering" aria-labelledby="engineering-title">
+      <h2 id="engineering-title">Synthetische Prüfung, getrennt von Papier</h2>
+      <div id="engineering-body"></div>
     </section>
   </main>
   <script src="/app.js"></script>
-  <noscript><p>Noch kein Paper-Durchlauf gestartet. Ohne JavaScript bleibt die Anzeige bei diesem Hinweis und liest keine Zahlen.</p></noscript>
+  <noscript><p>Noch kein Paper-Durchlauf gestartet. Ohne JavaScript werden keine Zahlen erfunden.</p></noscript>
 </body>
 </html>
