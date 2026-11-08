@@ -226,7 +226,7 @@ class SimulatorTest(unittest.TestCase):
             handoff = Path(temporary) / "handoff"
             manifest = sim.export_handoff(ROOT / "scripts" / "fixtures" / "local_paper" / "paper_config_template.json", handoff)
             self.assertFalse(manifest["run_started"])
-            self.assertEqual(manifest["plan_sha256"][:8], "6bed075e")
+            self.assertEqual(manifest["plan_sha256"][:8], "ada0def6")
             sim.verify_journal((handoff / "reviewer_journal.jsonl").read_bytes())
             incoming = Path(temporary) / "decisions.json"
             incoming.write_text(json.dumps({"schema_version": 1, "evidence_class": "synthetic_engineering_fixture", "envelopes": [], "supply": {"authenticated": False, "channel": "chat_api", "claimed_producer_role": "desk-lead", "coordinator": "sanctioned_messaging"}}), encoding="utf-8")

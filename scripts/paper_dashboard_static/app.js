@@ -151,11 +151,31 @@ function render(status) {
   document.querySelector("#budget").replaceChildren(el("h2", null, "Budget"), definition([
     ["Startbudget", template.present ? "100.00 EUR" : money(budgetAmount, budgetCurrency)],
     ["Nutzbares USDC-Quote", template.present ? null : handoff.usable_quote],
-    ["EUR/USD", template.present ? "Quelle benannt, Kurs nicht belegt" : (handoff.fx_status || "nicht verfügbar")],
-    ["USDC/USD", template.present ? "nicht verfügbar, keine Parität" : "nicht verfügbar"],
+    ["EUR/USD", template.present ? "ECB-Referenz, Kurs nicht gespeichert, beim Start neu lesen" : (handoff.fx_status || "nicht verfügbar")],
+    ["USDC/USD", template.present ? "Kraken letzter Trade, nicht gespeichert, keine Parität" : "nicht verfügbar"],
     ["Strategie", template.present ? "erforderlich, nicht ausgewählt" : (handoff.strategy_status || "nicht ausgewählt")],
     ["Exit", template.present ? "erforderlich, nicht ausgewählt" : "nicht ausgewählt"],
     ["Kampagne", template.present ? "nicht gestartet, maximal 3 Tage oder 5 Sim-Trades" : "keine"],
+  ]));
+  const fx = status.fx || {};
+  const fxPanel = document.querySelector("#fx");
+  fxPanel.replaceChildren(el("h2", null, "FX-Referenz"), el("p", "notice", fx.permanent_label || "real EUR/USDC exchange costs unmodelled; not a deposit-to-withdrawal return"));
+  fxPanel.append(definition([
+    ["Hinweis", fx.note_de],
+    ["Referenz-USDC", fx.reference_usdc],
+    ["ECB USD/EUR", fx.ecb_usd_per_eur],
+    ["ECB-Datum", fx.ecb_reference_date],
+    ["Carry-forward", fx.present ? (fx.carry_forward ? "ja, " + fx.carry_forward_days + " Kalendertage" : "nein") : null],
+    ["Kraken USD/USDC", fx.kraken_usd_per_usdc],
+    ["Trade-Alter Sekunden", fx.trade_age_s],
+    ["Rundendauer Sekunden", fx.round_duration_s],
+    ["Uhrabweichung Sekunden", fx.clock_skew_s],
+    ["Buchfrische", fx.book_freshness || "nicht aus dem Trade abgeleitet"],
+    ["Umrechnung ausgeführt", "nein"],
+    ["Wechselkosten", fx.exchange_costs || "UNMODELLED"],
+    ["EUR-Übersetzung", fx.eur_translation_status || "nicht verfügbar"],
+    ["USDC-PnL", "getrennt, nicht diese Referenz"],
+    ["Laufstart", "neu lesen"],
   ]));
   document.querySelector("#quality").replaceChildren(el("h2", null, "Qualität"), definition([
     ["Vorlage bereit", template.present ? "nein" : "keine Vorlage"],

@@ -444,6 +444,13 @@ def _fx(value, currency, budget):
         return "not_applicable", budget
     if currency != "EUR":
         raise PaperError("unsupported", "budget currency is not supported")
+    if value.get("status") == "reference_valuation":
+        need_keys(value, ["round", "run_started_utc", "status"], "fx")
+        if budget != Decimal("100"):
+            raise PaperError("fx_unavailable", "the reference valuation is defined for the 100 EUR budget")
+        from paper_fx import bind_run_fx
+        bound = bind_run_fx(value["round"], value["run_started_utc"])
+        return "reference_valuation", money(bound["reference_usdc"], "reference_usdc", positive=True)
     need_keys(value, ["status", "reason", "pair", "rate", "as_of", "source_ref", "usd_usdc_status", "usd_usdc_rate", "usd_usdc_as_of", "usd_usdc_source_ref"], "fx")
     if not isinstance(value["reason"], str) or len(value["reason"]) < 8:
         raise PaperError("config_incomplete", "fx.reason is required")
@@ -488,8 +495,8 @@ def validate_paper_template(raw):
         "mode", "observation", "paper_limits", "plan_sha256", "readiness", "schema_version",
         "status", "strategy", "training",
     }
-    if raw.get("plan_sha256") != "6bed075e4bfb4dc7db7520aa9db4492339b6bab49be07fa2d52b2410da1342aa":
-        raise PaperError("hash_mismatch", "template is not bound to plan 6bed075e")
+    if raw.get("plan_sha256") != "ada0def6834c7ddac2953c325bcce9a86f2e0ff3d5669180648b8e7c47a40b9c":
+        raise PaperError("hash_mismatch", "template is not bound to plan ada0def6")
     need_keys(raw, keys, "paper template")
     if raw["schema_version"] != SCHEMA_VERSION or raw["mode"] != "paper_config_template":
         raise PaperError("unsupported", "template mode must be paper_config_template")
@@ -502,16 +509,24 @@ def validate_paper_template(raw):
     if raw["ledger_quote"] != "USDC":
         raise PaperError("config_incomplete", "the venue ledger quote is USDC and is not the EUR budget")
     fx = raw["fx"]
-    need_keys(fx, ["eur_usd", "usdc_usd"], "template fx")
+    need_keys(fx, ["conversion_executed", "eur_usd", "exchange_costs", "formula", "max_clock_skew_s", "max_round_s", "policy", "provider_time", "stored_rates", "usdc_usd"], "template fx")
+    if fx["policy"] != "reference_valuation_only" or fx["conversion_executed"] is not False or fx["exchange_costs"] != "UNMODELLED" or fx["stored_rates"] is not False:
+        raise PaperError("config_incomplete", "FX is a reference valuation with unmodelled conversion costs and no stored rate")
+    if fx["formula"] != "100 * ECB_USD_per_EUR / Kraken_USD_per_USDC" or fx["max_round_s"] != 5 or fx["max_clock_skew_s"] != 5:
+        raise PaperError("config_incomplete", "the FX formula and retrieval bounds are fixed by the selected policy")
+    if fx["provider_time"] != "https://api.kraken.com/0/public/Time":
+        raise PaperError("config_incomplete", "provider time is the Kraken public Time endpoint")
     eur, usdc = fx["eur_usd"], fx["usdc_usd"]
-    need_keys(eur, ["status", "source_identity", "rate", "as_of"], "eur_usd")
-    need_keys(usdc, ["status", "rate", "source_ref", "parity_assumed"], "usdc_usd")
-    if eur["status"] != "required_uncited" or eur["rate"] is not None or eur["as_of"] is not None:
+    need_keys(eur, ["as_of", "executable", "max_calendar_days", "rate", "reference_date", "source", "status", "units"], "eur_usd")
+    need_keys(usdc, ["event_time", "max_trade_age_s", "observation", "parity_assumed", "rate", "source", "status", "units"], "usdc_usd")
+    if eur["status"] != "required_reread_at_run_start" or eur["rate"] is not None or eur["as_of"] is not None or eur["reference_date"] is not None or eur["executable"] is not False:
         raise PaperError("config_incomplete", "no EUR/USD rate is stored in the template")
-    if not isinstance(eur["source_identity"], str) or "ECB" not in eur["source_identity"]:
-        raise PaperError("config_incomplete", "EUR/USD source identity is the named reference, not a fetched rate")
-    if usdc["status"] != "unavailable" or usdc["rate"] is not None or usdc["source_ref"] is not None or usdc["parity_assumed"] is not False:
-        raise PaperError("config_incomplete", "USDC/USD is unavailable and 1:1 is not a default")
+    if eur["source"] != "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml" or eur["units"] != "USD per 1 EUR" or eur["max_calendar_days"] != 4:
+        raise PaperError("config_incomplete", "EUR/USD is the ECB daily reference, at most 4 calendar days old")
+    if usdc["status"] != "required_reread_at_run_start" or usdc["rate"] is not None or usdc["event_time"] is not None or usdc["parity_assumed"] is not False:
+        raise PaperError("config_incomplete", "USDC/USD is unavailable in the template and 1:1 is not a default")
+    if usdc["source"] != "https://api.kraken.com/0/public/Trades?pair=USDCUSD&count=1" or usdc["units"] != "USD per 1 USDC" or usdc["observation"] != "last_trade_only" or usdc["max_trade_age_s"] != 60:
+        raise PaperError("config_incomplete", "USDC/USD is the latest Kraken USDCUSD trade, not a book or a ticker")
     observation = raw["observation"]
     need_keys(observation, ["market", "phase", "opens_exposure"], "observation")
     if observation["market"] != "BTC" or observation["phase"] != "observation_first" or observation["opens_exposure"] is not False:
@@ -530,7 +545,7 @@ def validate_paper_template(raw):
         raise PaperError("unsupported", "this template is taker-only")
     limits = raw["paper_limits"]
     need_keys(limits, ["absolute_usdc", "authority", "daily_loss_stop", "live_desk_limits_unchanged", "max_gross_notional_multiple", "max_markets", "max_open_risk", "max_positions", "max_risk_per_trade", "run_kill_drawdown", "unit"], "paper limits")
-    if limits["authority"] != "coordinator_selected_under_user_planning_delegation" or limits["live_desk_limits_unchanged"] is not True:
+    if limits["authority"] != "claude_selected_under_user_delegation_pos170" or limits["live_desk_limits_unchanged"] is not True:
         raise PaperError("config_incomplete", "paper limits are not live desk limits")
     if limits["absolute_usdc"] is not None or limits["unit"] != "fraction_of_virtual_equity":
         raise PaperError("config_incomplete", "limits stay fractions until a cited FX conversion exists")
@@ -1993,6 +2008,10 @@ class Simulator:
             "budget": {"amount": dec_str(self.cfg["budget_cash"]), "currency": self.cfg["budget_currency"]},
             "chart": self._chart(),
             "fx": {
+                "conversion_executed": False,
+                "eur_translation": None,
+                "exchange_costs": "UNMODELLED" if self.cfg["fx_status"] == "reference_valuation" else None,
+                "permanent_label": "real EUR/USDC exchange costs unmodelled; not a deposit-to-withdrawal return" if self.cfg["fx_status"] == "reference_valuation" else None,
                 "revaluation_eur": None,
                 "status": self.cfg["fx_status"],
                 "usable_quote": None if self.cfg["usable_quote"] is None else dec_str(self.cfg["usable_quote"]),
@@ -2148,7 +2167,7 @@ def export_handoff(template_path, directory):
         "channel": "local_file",
         "coordinator": "sanctioned_messaging",
         "exit": "required_unselected",
-        "fx": "uncited",
+        "fx": "policy_selected_rates_not_stored",
         "judge_verdict": "pending",
         "native_decision": "pending",
         "reviewer": "not_run",

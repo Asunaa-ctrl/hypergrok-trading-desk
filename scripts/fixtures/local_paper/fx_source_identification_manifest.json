@@ -1,0 +1,194 @@
+{
+ "purpose": "Dated public FX source evidence for local-paper plan; NOT approved run FX; no run occurred.",
+ "directory_created_utc": "2026-11-08T15:58:23Z",
+ "retrievals": {
+  "kraken_time": {
+   "url": "https://api.kraken.com/0/public/Time",
+   "http_status": 200,
+   "local_request_utc": "2026-11-08T15:58:23.386Z",
+   "local_received_utc": "2026-11-08T15:58:23.550Z",
+   "body_sha256": "aa87ffcc761d1a19a39097b2e3483c2ff8f13af4df097d6f1f330a9fea7a1a37",
+   "http_date": [
+    "Sun, 08 Nov 2026 15:58:23 GMT"
+   ]
+  },
+  "kraken_assetpairs_usdcusd": {
+   "url": "https://api.kraken.com/0/public/AssetPairs?pair=USDCUSD",
+   "http_status": 200,
+   "local_request_utc": "2026-11-08T15:58:23.554Z",
+   "local_received_utc": "2026-11-08T15:58:23.714Z",
+   "body_sha256": "3081f8aa33ba49a8906573ac39061da37b2dac4b9ecf84ecdbd639ac7b7fc0b8",
+   "http_date": [
+    "Sun, 08 Nov 2026 15:58:23 GMT"
+   ]
+  },
+  "kraken_assets_usdc_usd": {
+   "url": "https://api.kraken.com/0/public/Assets?asset=USDC,ZUSD",
+   "http_status": 200,
+   "local_request_utc": "2026-11-08T15:58:23.719Z",
+   "local_received_utc": "2026-11-08T15:58:23.869Z",
+   "body_sha256": "b6cd7c0da740a9f78e31d67eb37959618823f97c37a9d5a1cddc51120697939a",
+   "http_date": [
+    "Sun, 08 Nov 2026 15:58:23 GMT"
+   ]
+  },
+  "kraken_ticker_usdcusd": {
+   "url": "https://api.kraken.com/0/public/Ticker?pair=USDCUSD",
+   "http_status": 200,
+   "local_request_utc": "2026-11-08T15:58:23.873Z",
+   "local_received_utc": "2026-11-08T15:58:24.021Z",
+   "body_sha256": "59735109926b8ca2da0b4393e4904b766d5e3423ca2a210b5ddfaf61e3844a92",
+   "http_date": [
+    "Sun, 08 Nov 2026 15:58:24 GMT"
+   ]
+  },
+  "kraken_depth_usdcusd": {
+   "url": "https://api.kraken.com/0/public/Depth?pair=USDCUSD&count=10",
+   "http_status": 200,
+   "local_request_utc": "2026-11-08T15:58:24.025Z",
+   "local_received_utc": "2026-11-08T15:58:24.173Z",
+   "body_sha256": "c4bd6303914101f45e11541457fd1e0ac99a3379ec032378ef98af9eff384ead",
+   "http_date": [
+    "Sun, 08 Nov 2026 15:58:24 GMT"
+   ]
+  },
+  "kraken_trades_usdcusd": {
+   "url": "https://api.kraken.com/0/public/Trades?pair=USDCUSD&count=5",
+   "http_status": 200,
+   "local_request_utc": "2026-11-08T15:58:24.177Z",
+   "local_received_utc": "2026-11-08T15:58:24.336Z",
+   "body_sha256": "12974ddafec2d1f7606eb6437190ea9dd420ed651b2d65e795953ad16f1ccf51",
+   "http_date": [
+    "Sun, 08 Nov 2026 15:58:24 GMT"
+   ]
+  },
+  "kraken_time_after": {
+   "url": "https://api.kraken.com/0/public/Time",
+   "http_status": 200,
+   "local_request_utc": "2026-11-08T15:58:24.341Z",
+   "local_received_utc": "2026-11-08T15:58:24.491Z",
+   "body_sha256": "659a816875aaf638dd9de072d640fe20eee36b8f9aeb72d2bc51808e6d6ef26a",
+   "http_date": [
+    "Sun, 08 Nov 2026 15:58:24 GMT"
+   ]
+  },
+  "ecb_eurofxref_daily": {
+   "url": "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml",
+   "http_status": 200,
+   "local_request_utc": "2026-11-08T15:58:24.495Z",
+   "local_received_utc": "2026-11-08T15:58:25.084Z",
+   "body_sha256": "84cba0d3dcc8f88bf78af2141786404ae391d545eac5c37f9dc67af9a7c9d615",
+   "http_date": [
+    "Sun, 08 Nov 2026 15:58:25 GMT"
+   ]
+  },
+  "ecb_sdmx_usd_last5": {
+   "url": "https://data-api.ecb.europa.eu/service/data/EXR/D.USD.EUR.SP00.A?lastNObservations=5&format=csvdata",
+   "http_status": 200,
+   "local_request_utc": "2026-11-08T15:58:25.088Z",
+   "local_received_utc": "2026-11-08T15:58:25.715Z",
+   "body_sha256": "2ea8a2d6bb7c97f6412f98ad257a7c08eb4a39adbb7b8fa9b1cf78f36baf4766",
+   "http_date": [
+    "Sun, 08 Nov 2026 15:58:25 GMT"
+   ]
+  },
+  "ecb_reference_rates_page": {
+   "url": "https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html",
+   "http_status": 200,
+   "local_request_utc": "2026-11-08T15:58:55.144Z",
+   "local_received_utc": "2026-11-08T15:58:55.806Z",
+   "body_sha256": "39f641efc3f4cbfceb92056f9c8fd2fd8958172fc0723c37be1621de6fb5f118",
+   "http_date": [
+    "Sun, 08 Nov 2026 15:58:55 GMT"
+   ]
+  },
+  "kraken_doc_ticker": {
+   "url": "https://docs.kraken.com/api/docs/rest-api/get-ticker-information",
+   "http_status": 200,
+   "local_request_utc": "2026-11-08T15:58:55.811Z",
+   "local_received_utc": "2026-11-08T15:58:56.013Z",
+   "body_sha256": "702048765aa008ee78dff39a39f8c13fead53c4c8b184efa79693ed46ed6eb22",
+   "http_date": [
+    "Sun, 08 Nov 2026 15:58:55 GMT"
+   ]
+  },
+  "kraken_doc_depth": {
+   "url": "https://docs.kraken.com/api/docs/rest-api/get-order-book",
+   "http_status": 200,
+   "local_request_utc": "2026-11-08T15:58:56.017Z",
+   "local_received_utc": "2026-11-08T15:58:56.201Z",
+   "body_sha256": "c3ffb228eb8ff67313e14c8128d1160c6abe9698b9abf04e3e0be83853e44c8e",
+   "http_date": [
+    "Sun, 08 Nov 2026 15:58:56 GMT"
+   ]
+  },
+  "kraken_support_asset_codes": {
+   "url": "https://support.kraken.com/articles/360001206766-bitcoin-currency-code-xbt-vs-btc",
+   "http_status": 200,
+   "local_request_utc": "2026-11-08T15:58:56.205Z",
+   "local_received_utc": "2026-11-08T15:58:56.775Z",
+   "body_sha256": "b29967b9e6592e474f2f578cbefce68293431f300207cd3b457b0d6f1204a983",
+   "http_date": [
+    "Sun, 08 Nov 2026 15:58:56 GMT"
+   ]
+  }
+ },
+ "kraken_usdcusd": {
+  "pair_metadata": "AssetPairs USDCUSD: base USDC, quote ZUSD, wsname USDC/USD, tick 0.0001, status online, execution_venue international; fees arrays empty in public metadata (NOT interpreted as zero conversion cost)",
+  "zusd_semantics": "Kraken support article lists ZUSD: USD among Z-prefixed fiat codes; Assets altname USD. aclass 'currency' alone does not prove fiat.",
+  "units": "price = USD per 1 USDC",
+  "ticker": {
+   "bid": "0.99970000",
+   "ask": "0.99980000",
+   "last": "0.99980000",
+   "vwap_24h": "0.99975227",
+   "mid_derived": "0.99975000",
+   "spread_bps": "1.00",
+   "event_timestamp": "NONE in ticker response"
+  },
+  "depth_top": {
+   "best_bid": [
+    "0.99970000",
+    "4885960.971"
+   ],
+   "best_ask": [
+    "0.99980000",
+    "4744430.430"
+   ],
+   "level_timestamp_semantics": "per-level unix seconds per docs [price,volume,timestamp]; meaning not further specified",
+   "level_ts_max_utc": "2026-11-08T15:58:19.000Z",
+   "level_ts_min_utc": "2026-11-06T20:12:12.000Z"
+  },
+  "latest_trade": {
+   "price": "0.99980000",
+   "event_time_utc": "2026-11-08T15:58:01.517Z",
+   "side": "b"
+  },
+  "server_time": [
+   {
+    "unixtime": 1794153503,
+    "utc": "2026-11-08T15:58:23.000Z"
+   },
+   {
+    "unixtime": 1794153504,
+    "utc": "2026-11-08T15:58:24.000Z"
+   }
+  ],
+  "freshness_note": "Ticker has no event time; freshness must use latest trade event time and/or depth level timestamps against server time, never local retrieval time alone. Sample: latest trade 2026-11-08T15:58:01.517Z vs server 2026-11-08T15:58:24.000Z.",
+  "nature": "single-venue market quote, not an index, not a guaranteed executable conversion for this desk"
+ },
+ "ecb_eurusd": {
+  "reference_date": "2026-11-06",
+  "usd_per_eur": "1.1165",
+  "units": "USD per 1 EUR (SDMX CURRENCY=USD, CURRENCY_DENOM=EUR, UNIT=USD, title 'US dollar/Euro ECB reference exchange rate, 2.15 pm (C.E.T.)')",
+  "publication": "usually ~16:00 CET each working day except TARGET closing days; concertation ~14:10 CET (ECB page); information only, transaction use discouraged",
+  "weekend_note": "Retrieved Sunday 2026-11-08: latest reference is Friday 2026-11-06. Any use on a weekend is an explicit carry-forward that must be labelled; policy must be selected via Claude.",
+  "executable": false
+ },
+ "illustrative_mapping_NOT_RUN_FX": {
+  "formula": "C_USDC = 100 * USD_per_EUR / USD_per_USDC",
+  "with_ecb_and_kraken_mid": "111.6779",
+  "with_ecb_and_kraken_ask": "111.6723",
+  "note": "ECB has no bid/ask; EUR->USD conversion cost and any USD->USDC fee are NOT modelled; buying USDC uses the ask (USD per USDC). Reference is not an executable conversion."
+ }
+}

@@ -42,7 +42,7 @@ Damit die Oberfläche sichtbar wird, muss der Branch auf dem Rechner ausgecheckt
 
 ## Abnahme, nicht trainingsbereit
 
-Plantext-Hash `6bed075e4bfb4dc7db7520aa9db4492339b6bab49be07fa2d52b2410da1342aa`. Ein bestandener Engineering-Test ist nicht Trainingsbereitschaft.
+Plantext-Hash `ada0def6834c7ddac2953c325bcce9a86f2e0ff3d5669180648b8e7c47a40b9c`. Ein bestandener Engineering-Test ist nicht Trainingsbereitschaft.
 
 | Thema | Stand |
 | --- | --- |
@@ -51,7 +51,8 @@ Plantext-Hash `6bed075e4bfb4dc7db7520aa9db4492339b6bab49be07fa2d52b2410da1342aa`
 | Offizieller Host-Abruf | implementiert, opt-in, Standard aus. `paper_capture.execute_observation` nach `--confirm-public-info`. POST nur `https://api.hyperliquid.xyz/info` oder Testnet `/info`, TLS-Prüfung, keine Redirects, kein Proxy, höchstens 8 Requests, 1 s Abstand, 60 s Wandzeit. Ohne Bestätigung `collection_not_confirmed` und kein Socket. In diesem Lauf nicht ausgeführt |
 | Datei-Handoff ohne Bot-API | implementiert, `export_handoff`, `import_decisions` |
 | Equity/Kerzen/Buch | implementiert für ein geprüftes `observed_public_info`-Schema und für einen `captured_public_replay`-Lauf: Kerzen, Buch, Equity, Netto, Drawdown, Lücken, fehlende Kerzen, veraltetes Buch. Lokaler SHA-256, `externally_authenticated` falsch. Synthetische Fixtures bleiben in der Engineering-Fläche. Ohne Datei bleibt die Marktfläche leer |
-| FX-Kurs, native Entscheidung, echter Lauf | fehlen, blockieren den Start |
+| FX-Referenzleser | implementiert, opt-in, Standard aus. `paper_fx.execute_reference` nach `--confirm-public-fx`. ECB-Tages-XML, Kraken Time und Kraken USDCUSD-Trade, genau diese drei URLs. ≤4 Kalendertage, Trade-Alter ≤60 s gegen Providerzeit, Runde ≤5 s, Uhrabweichung ≤5 s. Formel `100 * ECB_USD_per_EUR / Kraken_USD_per_USDC`. Keine gespeicherten Altkurse, keine ausgeführte Umrechnung, Wechselkosten `UNMODELLED`. In diesem Lauf nicht ausgeführt |
+| Native Entscheidung, echter Lauf, Strategie, Exit | fehlen, blockieren den Start |
 
 Spätere Beobachtung, nur durch den Koordinator und nicht in diesem Lauf:
 
@@ -64,7 +65,18 @@ python3 scripts/paper_capture.py --to-tape ../paper-data/captures/btc-obs-1/mani
   --output ../paper-data/tapes/btc-obs-1.json
 ```
 
-Der erste Befehl öffnet keinen Socket. Der zweite ist der einzige öffentliche Lesezugriff. Er wählt keine Strategie und öffnet keine Exposition.
+Der erste Befehl öffnet keinen Socket. Der zweite ist der einzige öffentliche Hyperliquid-Lesezugriff. Er wählt keine Strategie und öffnet keine Exposition.
+
+FX-Referenz, ebenfalls nur später und nicht in diesem Lauf:
+
+```bash
+python3 scripts/paper_fx.py --policy
+python3 scripts/paper_fx.py --import-round scripts/fixtures/local_paper/fx_source_identification_manifest.json
+python3 scripts/paper_fx.py --execute-reference --confirm-public-fx \
+  --as-of YYYY-MM-DD --output ../paper-data/fx/run-start-1
+```
+
+`--policy` öffnet keinen Socket. Der Import der Quellen-Manifest-Datei muss `not_run_fx` ergeben. Nur der dritte Befehl liest ECB und Kraken. Er schreibt keinen Kurs in die Vorlage und startet keinen Lauf.
 
 Beweisbilder, nur Agentenrechner: `/opt/cursor/artifacts/papier-markt-leer.png` zeigt die leere Marktfläche. `/opt/cursor/artifacts/papier-testschema.png` zeigt die TEST-ONLY-Schemazeichnung und ist kein externer Abruf.
 

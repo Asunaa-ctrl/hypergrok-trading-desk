@@ -12,21 +12,42 @@
   "execution": {"maker_fills": "disabled", "order_types": "taker_only"},
   "exit": {"policy_id": null, "status": "required_unselected"},
   "fx": {
+    "conversion_executed": false,
     "eur_usd": {
       "as_of": null,
+      "executable": false,
+      "max_calendar_days": 4,
       "rate": null,
-      "source_identity": "ECB euro foreign exchange reference rates page, named only; no rate copied",
-      "status": "required_uncited"
+      "reference_date": null,
+      "source": "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml",
+      "status": "required_reread_at_run_start",
+      "units": "USD per 1 EUR"
     },
-    "usdc_usd": {"parity_assumed": false, "rate": null, "source_ref": null, "status": "unavailable"}
+    "exchange_costs": "UNMODELLED",
+    "formula": "100 * ECB_USD_per_EUR / Kraken_USD_per_USDC",
+    "max_clock_skew_s": 5,
+    "max_round_s": 5,
+    "policy": "reference_valuation_only",
+    "provider_time": "https://api.kraken.com/0/public/Time",
+    "stored_rates": false,
+    "usdc_usd": {
+      "event_time": null,
+      "max_trade_age_s": 60,
+      "observation": "last_trade_only",
+      "parity_assumed": false,
+      "rate": null,
+      "source": "https://api.kraken.com/0/public/Trades?pair=USDCUSD&count=1",
+      "status": "required_reread_at_run_start",
+      "units": "USD per 1 USDC"
+    }
   },
   "ledger_quote": "USDC",
   "mode": "paper_config_template",
   "observation": {"market": "BTC", "opens_exposure": false, "phase": "observation_first"},
-  "plan_sha256": "6bed075e4bfb4dc7db7520aa9db4492339b6bab49be07fa2d52b2410da1342aa",
+  "plan_sha256": "ada0def6834c7ddac2953c325bcce9a86f2e0ff3d5669180648b8e7c47a40b9c",
   "paper_limits": {
     "absolute_usdc": null,
-    "authority": "coordinator_selected_under_user_planning_delegation",
+    "authority": "claude_selected_under_user_delegation_pos170",
     "daily_loss_stop": "0.02",
     "live_desk_limits_unchanged": true,
     "max_gross_notional_multiple": "1",

@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 
 from cli_contract import ReadOnlyParser
 from paper_capture import INTERVALS_MS, validate_observed_bundle
+from paper_fx import saved_view
 from paper_sim import PaperError, validate_paper_template
 
 HOST = "127.0.0.1"
@@ -377,6 +378,7 @@ def scan(root):
                 "note_de": "Widersprüchliche Dateien. Kein Kontostand aus diesem Ordner.",
             } for item in conflicts],
         },
+        "fx": saved_view(root / "fx" / "reference.json"),
         "handoff": _handoff(root),
         "market": _market(root),
         "paper": {
