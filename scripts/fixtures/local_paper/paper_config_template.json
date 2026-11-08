@@ -23,6 +23,7 @@
   "ledger_quote": "USDC",
   "mode": "paper_config_template",
   "observation": {"market": "BTC", "opens_exposure": false, "phase": "observation_first"},
+  "plan_sha256": "6bed075e4bfb4dc7db7520aa9db4492339b6bab49be07fa2d52b2410da1342aa",
   "paper_limits": {
     "absolute_usdc": null,
     "authority": "coordinator_selected_under_user_planning_delegation",

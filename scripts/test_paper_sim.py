@@ -180,6 +180,52 @@ class SimulatorTest(unittest.TestCase):
         held = sim.validate_config(cfg)
         self.assertIsNone(held["usable_quote"])
 
+    def test_capture_entrypoint_handoff_and_offline_conversion(self):
+        import paper_capture as cap
+        plan = cap.observation_plan()
+        self.assertEqual([item["type"] for item in cap.plan_requests(plan)], ["meta", "metaAndAssetCtxs", "l2Book"])
+        with patch("socket.socket", side_effect=AssertionError("socket")), patch("sys.stdout"):
+            self.assertEqual(cap.main(["--observe-plan", "--coin", "BTC", "--max-requests", "4"]), 0)
+            self.assertEqual(cap.main(["--execute-observation", "--base-url", "https://api.hyperliquid.xyz", "--coin", "BTC"]), 2)
+            self.assertEqual(cap.main(["--execute-observation", "--base-url", "https://evil.example", "--coin", "BTC"]), 2)
+        def opener(url, payload):
+            self.assertTrue(url.endswith("/info"))
+            return 302, [("Location", "https://api.hyperliquid.xyz/" + "exchange")], {}
+        with self.assertRaises(sim.NetworkDenied):
+            cap.capture_loopback("http://127.0.0.1:9", plan, opener, "2026-11-08T00:00:00Z")
+        with self.assertRaises(sim.NetworkDenied):
+            sim.PublicInfoClient("https://api.hyperliquid.xyz").submit("/" + "exchange", {"type": "meta"}, lambda *_args: (_ for _ in ()).throw(AssertionError("called")))
+        parameters = {"coin": "BTC", "include": ["l2Book", "candleSnapshot", "fundingHistory"], "max_requests": 4, "purpose": "bounded_snapshot", "window": {"interval": "1h", "startTime": 0, "endTime": 3600000}, "funding_window": {"startTime": 0, "endTime": 3600000}}
+        planned = cap.plan_requests(parameters)
+        bodies = [
+            {"coin": "BTC", "time": 1000, "levels": [[{"px": "100", "sz": "1"}], [{"px": "101", "sz": "1"}]]},
+            [{"t": 0, "T": 3599999, "s": "BTC", "i": "1h", "o": "100", "h": "102", "l": "99", "c": "101", "v": "1", "n": 1}],
+            [{"coin": "BTC", "time": 3600000, "fundingRate": "0.0001", "premium": "0.0001"}],
+        ]
+        fixture = {"evidence_class": "loopback_fixture", "origin": "http://127.0.0.1:9", "parameters": parameters, "responses": [{"request": request, "status": 200, "body": body, "retrieved_at_utc": "2026-11-08T00:00:00Z", "local_receipt_ms": 1000} for request, body in zip(planned, bodies)]}
+        tape = cap.fixture_to_tape(cap.bundle_from_fixture(fixture))
+        self.assertEqual(tape["evidence_class"], "loopback_fixture")
+        self.assertNotIn("trade", {event["type"] for event in tape["events"]})
+        self.assertIn("book", {event["type"] for event in tape["events"]})
+        funding = next(event for event in tape["events"] if event["type"] == "funding")
+        self.assertIsNone(funding["oracle_px"])
+        import tempfile
+        with tempfile.TemporaryDirectory() as temporary:
+            handoff = Path(temporary) / "handoff"
+            manifest = sim.export_handoff(ROOT / "scripts" / "fixtures" / "local_paper" / "paper_config_template.json", handoff)
+            self.assertFalse(manifest["run_started"])
+            self.assertEqual(manifest["plan_sha256"][:8], "6bed075e")
+            sim.verify_journal((handoff / "reviewer_journal.jsonl").read_bytes())
+            incoming = Path(temporary) / "decisions.json"
+            incoming.write_text(json.dumps({"schema_version": 1, "evidence_class": "synthetic_engineering_fixture", "envelopes": [], "supply": {"authenticated": False, "channel": "chat_api", "claimed_producer_role": "desk-lead", "coordinator": "sanctioned_messaging"}}), encoding="utf-8")
+            with self.assertRaises(sim.PaperError):
+                sim.import_decisions(incoming)
+            incoming.write_text(json.dumps({"schema_version": 1, "evidence_class": "synthetic_engineering_fixture", "envelopes": [], "supply": {"authenticated": False, "channel": "local_file", "claimed_producer_role": "desk-lead", "coordinator": "sanctioned_messaging"}}), encoding="utf-8")
+            summary = sim.import_decisions(incoming)
+            self.assertEqual(summary["native_decision"], "pending")
+            self.assertFalse(summary["authenticated"])
+            self.assertEqual(summary["runtime_integration"], False)
+
     def test_schema_and_cli_are_offline(self):
         self.assertEqual(sim.schema()["network_access"], "none")
         self.assertFalse(sim.schema()["recommended_role"]["runtime_integration"])

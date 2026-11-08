@@ -40,6 +40,21 @@ Der Agent hat die Seite nur auf dem Loopback seines eigenen Remote-Rechners gele
 
 Damit die Oberfläche sichtbar wird, muss der Branch auf dem Rechner ausgecheckt werden, auf dem der Browser läuft. Dort, und nur dort, startet `python3 scripts/paper_dashboard.py --root <lokaler Ordner> --port 8765`. Der Browser auf demselben Rechner kann danach dessen Loopback öffnen. Ein anderer Rechner sieht diese Schleifenadresse nicht.
 
+## Abnahme, nicht trainingsbereit
+
+Plantext-Hash `6bed075e4bfb4dc7db7520aa9db4492339b6bab49be07fa2d52b2410da1342aa`. Ein bestandener Engineering-Test ist nicht Trainingsbereitschaft.
+
+| Thema | Stand |
+| --- | --- |
+| Vorlage 100 EUR, Taker, BTC, 3 Tage oder 5 Trades, Strategie/Exit ungewählt | implementiert, `validate_paper_template`, nicht gestartet |
+| Loopback-Capture, Redirect/Host/Exchange-Sperre, Offline-Umwandlung | implementiert, `paper_capture.capture_loopback`, `fixture_to_tape`, `main --observe-plan` |
+| Offizieller Host-Abruf | in diesem Build abgelehnt, `collection_not_enabled` |
+| Datei-Handoff ohne Bot-API | implementiert, `export_handoff`, `import_decisions` |
+| Equity/Kerzen-Zeichnung | implementiert; synthetische Serien nur in der Engineering-Fläche, Marktfläche bleibt leer |
+| FX-Kurs, native Entscheidung, echter Lauf | fehlen, blockieren den Start |
+
+Beweisbild, nur Agentenrechner: `/opt/cursor/artifacts/papier-terminal-beweis.png`
+
 ## Vorlage, nicht gestartet
 
 `scripts/fixtures/local_paper/paper_config_template.json` ist die ungelaufene Papier-Vorlage: 100,00 EUR, USDC als Börsenquote, kein gespeicherter EUR/USD-Kurs, USDC/USD nicht verfügbar und nicht 1:1, BTC-Beobachtung ohne Exposition, nur Taker, Strategie und Exit erforderlich aber nicht ausgewählt, erste Grenze 3 Tage oder 5 simulierte Trades. Die 14-Tage- und 20-Trade-Angabe gilt nicht. `--validate-template` prüft die Datei und startet nichts. Ein späterer Start bleibt nur zulässig, wenn die offenen Tore wirklich belegt sind. Der Windows-Rechner wurde von hier nicht aktualisiert.

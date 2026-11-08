@@ -224,13 +224,24 @@ function render(status) {
   const wanted = filter.value;
   const records = status.engineering.records.filter((record) => wanted === "all" || record.status === wanted);
   engineering.append(el("p", null, "Angezeigt " + records.length + " von " + counts.recorded + " aufgezeichneten Protokollen."));
+  const fixtureMarket = status.engineering.fixture_market || {candles: [], book: null};
+  if (fixtureMarket.candles.length || fixtureMarket.book) {
+    engineering.append(el("p", null, "SYNTHETISCH. Diese Kerzen und das Buch sind kein Markterfassung und werden nicht als Papierkurs gezeichnet."));
+    if (fixtureMarket.candles.length) engineering.append(candleChart(fixtureMarket.candles));
+    if (fixtureMarket.book) engineering.append(bookLadder(fixtureMarket.book));
+  }
   if (status.engineering.synthetic_runs.length) {
-    engineering.append(el("p", null, "Erfundenes Fixture. Keine Kerzen und keine Papierkurve aus diesen Läufen."));
-    status.engineering.synthetic_runs.forEach((run) => engineering.append(definition([
-      ["Lauf", run.id],
-      ["Quote-Cash", run.ledger && run.ledger.cash],
-      ["Position", run.ledger && run.ledger.position],
-    ])));
+    engineering.append(el("p", null, "SYNTHETISCH. Fixture-Equity ist keine Papierkurve."));
+    status.engineering.synthetic_runs.forEach((run) => {
+      engineering.append(definition([
+        ["Lauf", run.id],
+        ["Quote-Cash", run.ledger && run.ledger.cash],
+        ["Position", run.ledger && run.ledger.position],
+        ["Netto", run.pnl_breakdown && run.pnl_breakdown.net_quote],
+        ["Drawdown", run.drawdown],
+      ]));
+      if (run.fixture_series && run.fixture_series.length) engineering.append(lineChart(run.fixture_series, "USDC Fixture"));
+    });
   }
 }
 

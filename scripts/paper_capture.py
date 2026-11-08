@@ -226,6 +226,45 @@ def _quality(records):
     }
 
 
+def fixture_to_tape(bundle):
+    """Offline conversion. Candles never become a book, a trade, or an oracle."""
+    if bundle.get("evidence_class") != "loopback_fixture":
+        raise PaperError("config_incomplete", "only a loopback fixture can be converted here")
+    events = []
+    sequence = 1
+    for record in bundle.get("records") or []:
+        kind = record["request"]["type"]
+        body = record["body"]
+        stamp = record.get("local_receipt_ms", 0)
+        if kind == "l2Book" and isinstance(body, dict) and isinstance(body.get("levels"), list):
+            bids, asks = body["levels"][0], body["levels"][1]
+            events.append({"sequence": sequence, "type": "book", "exchange_time_ms": int(body.get("time") or stamp), "local_receipt_ms": stamp, "coin": body.get("coin", "BTC"), "depth": "l2", "bids": [{"px": level["px"], "sz": level["sz"]} for level in bids], "asks": [{"px": level["px"], "sz": level["sz"]} for level in asks]})
+            sequence += 1
+        elif kind == "metaAndAssetCtxs" and isinstance(body, list) and len(body) == 2 and body[1]:
+            row = body[1][0]
+            events.append({"sequence": sequence, "type": "asset_ctx", "exchange_time_ms": stamp, "local_receipt_ms": stamp, "coin": bundle["parameters"]["coin"], "mark_px": row.get("markPx"), "oracle_px": row.get("oraclePx")})
+            sequence += 1
+        elif kind == "candleSnapshot" and isinstance(body, list):
+            for row in body:
+                events.append({"sequence": sequence, "type": "candle", "exchange_time_ms": row["t"], "local_receipt_ms": stamp, "coin": row.get("s", bundle["parameters"]["coin"]), "t": row["t"], "T": row["T"], "o": row["o"], "h": row["h"], "l": row["l"], "c": row["c"], "v": row.get("v", "0"), "n": row.get("n", 0), "closed": True})
+                sequence += 1
+        elif kind == "fundingHistory" and isinstance(body, list):
+            for row in body:
+                events.append({"sequence": sequence, "type": "funding", "exchange_time_ms": row["time"], "local_receipt_ms": stamp, "coin": row["coin"], "funding_rate": row.get("fundingRate"), "oracle_px": None, "premium": row.get("premium")})
+                sequence += 1
+    if any(event["type"] == "trade" for event in events):
+        raise PaperError("unsupported", "conversion must not invent trades")
+    return {"schema_version": SCHEMA_VERSION, "evidence_class": "loopback_fixture", "label": "synthetic loopback fixture, not market evidence", "events": events}
+
+
+def observation_plan(coin="BTC", max_requests=4):
+    if coin != "BTC":
+        raise PaperError("config_incomplete", "the authorized observation market is BTC")
+    if type(max_requests) is not int or not 1 <= max_requests <= 10:
+        raise PaperError("config_incomplete", "observation allows at most 10 public info requests")
+    return {"coin": coin, "include": ["meta", "metaAndAssetCtxs", "l2Book"], "max_requests": max_requests, "max_snapshots": 10, "purpose": "bounded_snapshot", "opens_exposure": False}
+
+
 def assert_no_execution_tape(bundle):
     if bundle["quality"]["execution_tape"] != "unavailable":
         raise PaperError("unsupported", "this build does not promote a capture into an execution tape")
@@ -253,6 +292,11 @@ def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = ReadOnlyParser(prog="paper_capture", description="Plan or convert a local public-info fixture. No external collection.", machine_readable="--json" in argv)
     parser.add_argument("--schema", action="store_true")
+    parser.add_argument("--observe-plan", action="store_true")
+    parser.add_argument("--execute-observation", action="store_true")
+    parser.add_argument("--coin", default="BTC")
+    parser.add_argument("--max-requests", type=int, default=4)
+    parser.add_argument("--base-url")
     parser.add_argument("--from-fixture", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--json", action="store_true")
@@ -260,6 +304,19 @@ def main(argv=None):
     if args.schema:
         print(json.dumps(schema(), indent=2, sort_keys=True))
         return 0
+    if args.observe_plan:
+        plan = observation_plan(args.coin, args.max_requests)
+        print(json.dumps({"schema_version": SCHEMA_VERSION, "live_collection": "not_performed", "requests": plan_requests(plan), "plan": plan}, indent=2, sort_keys=True))
+        return 0
+    if args.execute_observation:
+        if not args.base_url:
+            parser.error("--base-url is required and this command was not run")
+        try:
+            classify_origin(args.base_url)
+        except PaperError as exc:
+            print(json.dumps({"schema_version": SCHEMA_VERSION, "error": {"code": exc.code, "message": str(exc)}}, sort_keys=True))
+            return 2
+        parser.error("loopback observation needs --from-fixture in this build; no socket client is invoked here")
     if args.from_fixture is None or args.output is None:
         parser.error("--from-fixture and --output are required; external collection is not enabled")
     fixture = json.loads(Path(args.from_fixture).read_text(encoding="utf-8"))

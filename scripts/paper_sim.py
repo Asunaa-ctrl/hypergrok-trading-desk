@@ -485,9 +485,11 @@ def validate_paper_template(raw):
     """Validate the explicit 100 EUR paper template. This does not start a run or select a strategy."""
     keys = {
         "auto_start", "campaign", "capital", "execution", "exit", "fx", "ledger_quote",
-        "mode", "observation", "paper_limits", "readiness", "schema_version", "status",
-        "strategy", "training",
+        "mode", "observation", "paper_limits", "plan_sha256", "readiness", "schema_version",
+        "status", "strategy", "training",
     }
+    if raw.get("plan_sha256") != "6bed075e4bfb4dc7db7520aa9db4492339b6bab49be07fa2d52b2410da1342aa":
+        raise PaperError("hash_mismatch", "template is not bound to plan 6bed075e")
     need_keys(raw, keys, "paper template")
     if raw["schema_version"] != SCHEMA_VERSION or raw["mode"] != "paper_config_template":
         raise PaperError("unsupported", "template mode must be paper_config_template")
@@ -1149,6 +1151,7 @@ class Simulator:
         self.duplicates = 0
         self.out_of_order = 0
         self.gaps = 0
+        self._gap_before_next = False
         self.reconnects = 0
         self.open_candles = 0
         self.closed_candles = 0
@@ -1225,6 +1228,7 @@ class Simulator:
             self._on_funding(event)
         elif kind == "gap":
             self.gaps += 1
+            self._gap_before_next = True
             self.book.trusted = False
             self.book.reason = "gap"
         elif kind == "reconnect":
@@ -1834,7 +1838,15 @@ class Simulator:
         if drawdown > self.max_dd:
             self.max_dd = drawdown
         if len(self.equity_points) < 5000:
-            self.equity_points.append({"equity": dec_str(equity), "time_ms": time_ms})
+            self.equity_points.append({
+                "cash": dec_str(self.cash),
+                "equity": dec_str(equity),
+                "gap_before": self._gap_before_next,
+                "realized": dec_str(self.realized),
+                "time_ms": time_ms,
+                "unrealized": None if self._unrealized() is None else dec_str(self._unrealized()),
+            })
+            self._gap_before_next = False
 
     def _log(self, record):
         record.setdefault("mode", "local_paper")
@@ -2118,6 +2130,65 @@ def verify_run(directory):
     return json.loads(result["files"]["manifest.json"])
 
 
+def export_handoff(template_path, directory):
+    """Write a local evidence bundle. It contains no verdict and starts no run."""
+    raw = load_exact(template_path)
+    validate_paper_template(raw)
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=False)
+    template_bytes = Path(template_path).read_bytes()
+    pending = {
+        "authenticated": False,
+        "channel": "local_file",
+        "coordinator": "sanctioned_messaging",
+        "exit": "required_unselected",
+        "fx": "uncited",
+        "judge_verdict": "pending",
+        "native_decision": "pending",
+        "reviewer": "not_run",
+        "risk_verdict": "pending",
+        "runtime_integration": False,
+        "strategy": "required_unselected",
+    }
+    journal = Journal()
+    journal.write({"fail_key": None, "human_review": "not_run", "kind": "reviewer_pending", "mode": "local_paper"})
+    files = {"pending.json": pretty(pending), "reviewer_journal.jsonl": journal.text(), "template.json": template_bytes}
+    manifest = {
+        "files": {name: {"bytes": len(data), "sha256": digest(data)} for name, data in files.items()},
+        "plan_sha256": raw["plan_sha256"],
+        "ready": False,
+        "run_started": False,
+        "training": "not_run",
+    }
+    files["manifest.json"] = pretty(manifest)
+    for name, data in files.items():
+        (directory / name).write_bytes(data)
+    return manifest
+
+
+def import_decisions(path):
+    """Read a coordinator-supplied file. No chat client and no generated verdict."""
+    document = load_exact(path)
+    supply = document.get("supply")
+    if not isinstance(supply, dict):
+        raise PaperError("config_incomplete", "imported decisions need a supply record")
+    need_keys(supply, ["authenticated", "channel", "claimed_producer_role", "coordinator"], "supply")
+    if supply["authenticated"] is not False or supply.get("runtime_integration") is True:
+        raise PaperError("unsupported", "a file cannot authenticate a Bot")
+    if supply["channel"] != "local_file" or supply["coordinator"] != "sanctioned_messaging":
+        raise PaperError("unsupported", "decisions are imported from a local file, not a chat or Bot API")
+    if supply["claimed_producer_role"] not in {"desk-lead", "risk-manager", "trade-reviewer"}:
+        raise PaperError("config_incomplete", "claimed role is not one of the existing roles")
+    source = RecordedDecisionSource({key: document[key] for key in ("schema_version", "evidence_class", "envelopes")})
+    return {
+        "authenticated": False,
+        "envelopes": len(source.envelopes),
+        "invalid": len(source.invalid),
+        "native_decision": "pending" if not source.envelopes else "imported_file_unauthenticated",
+        "runtime_integration": False,
+    }
+
+
 def schema():
     return {
         "schema_version": SCHEMA_VERSION,
@@ -2149,6 +2220,8 @@ def main(argv=None):
     parser.add_argument("--schema", action="store_true")
     parser.add_argument("--validate-config", type=Path)
     parser.add_argument("--validate-template", type=Path)
+    parser.add_argument("--export-handoff", type=Path)
+    parser.add_argument("--import-decisions", type=Path)
     parser.add_argument("--replay", action="store_true")
     parser.add_argument("--verify-run", type=Path)
     parser.add_argument("--config", type=Path)
@@ -2160,6 +2233,16 @@ def main(argv=None):
     try:
         if args.schema:
             print(json.dumps(schema(), indent=2, sort_keys=True))
+            return 0
+        if args.export_handoff:
+            if args.output is None:
+                parser.error("--output is required for a handoff bundle")
+            manifest = export_handoff(args.export_handoff, args.output)
+            print(json.dumps({"schema_version": SCHEMA_VERSION, "mode": "local_file_handoff", "ready": manifest["ready"], "run_started": False, "training": "not_run"}, sort_keys=True))
+            return 0
+        if args.import_decisions:
+            summary = import_decisions(args.import_decisions)
+            print(json.dumps({"schema_version": SCHEMA_VERSION, "mode": "local_file_handoff", **summary}, sort_keys=True))
             return 0
         if args.validate_template:
             report = validate_paper_template(load_exact(args.validate_template))

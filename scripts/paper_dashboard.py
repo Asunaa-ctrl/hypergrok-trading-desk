@@ -98,6 +98,7 @@ def _run(directory):
         "orders": report.get("orders"),
         "orders_detail": _orders(directory),
         "chart": report.get("chart") or {"eligible": False, "points": [], "reason_de": "Keine echte Papierbeobachtung. Eine Kurve wird nicht gezeichnet.", "slippage_included_in_equity": False},
+        "fixture_series": report.get("equity_points") or [] if config_class == "synthetic_engineering_fixture" else [],
         "pnl_breakdown": report.get("pnl_breakdown"),
         "budget": report.get("budget"),
         "fx": report.get("fx"),
@@ -214,6 +215,22 @@ def _market_payload(candles, book, last_seen, fixture):
     }
 
 
+def _fixture_market(root):
+    path = root / "engineering" / "synthetic_market.json"
+    empty = {"book": None, "candles": [], "label": "synthetic_engineering_fixture", "plotted_as_market": False}
+    if not path.is_file() or path.is_symlink():
+        return empty
+    try:
+        raw = _read_json(path)
+    except (OSError, json.JSONDecodeError, UnicodeError):
+        return empty
+    if raw.get("evidence_class") != "synthetic_engineering_fixture":
+        return empty
+    candles = raw.get("candles") if isinstance(raw.get("candles"), list) else []
+    book = raw.get("book") if isinstance(raw.get("book"), dict) else None
+    return {"book": book, "candles": candles, "label": "synthetic_engineering_fixture", "plotted_as_market": False}
+
+
 def _handoff(root):
     path = root / "handoff" / "config.json"
     if not path.is_file() or path.is_symlink():
@@ -265,6 +282,7 @@ def scan(root):
                 "failed": sum(item.get("status") == "failed" for item in records),
                 "errors": sum(item.get("status") == "error" for item in records),
             },
+            "fixture_market": _fixture_market(root),
             "synthetic_runs": synthetic,
             "conflicts": [{
                 "id": item.get("id"),
